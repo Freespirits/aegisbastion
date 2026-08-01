@@ -1,0 +1,7 @@
+[
+  ["original"],
+  ["http://news.example.com/article/1"],
+  ["https://shop.example.com:443/cart"],
+  ["news.example.com/plain-host"],
+  ["http://unrelated.example.org/x"]
+]

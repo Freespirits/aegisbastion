@@ -1,0 +1,158 @@
+syntax = "proto3";
+
+package aegisbastion.platform.v1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+import "aegisbastion/platform/v1/mission.proto";
+import "aegisbastion/platform/v1/plan.proto";
+import "aegisbastion/platform/v1/registry.proto";
+import "aegisbastion/platform/v1/types.proto";
+
+// PlannerAPI — the gRPC surface consumed by the commander adapters (HexStrike
+// MCP adapter, CAI REST adapter; doc 01 §7.1–7.2). Adapters are thin: they
+// authenticate commanders (mTLS), tag submitted_by, and forward; all policy
+// lives in the Orchestrator/gatekeeper. Commanders never emit task.assign.* —
+// only the Orchestrator can (doc 01 §4.2 rule 5).
+option go_package = "github.com/aegisbastion/aegisbastion/gen/go/aegisbastion/platform/v1;platformv1";
+
+// SubmitTaskPlanRequest carries a commander's plan (doc 01 §7.2).
+message SubmitTaskPlanRequest {
+  // The proposed plan.
+  TaskPlan plan = 1;
+}
+
+// SubmitTaskPlanResponse is the Orchestrator's verdict (doc 01 §7.2: ACCEPTED |
+// PARTIAL | REJECTED with per-task reasons).
+message SubmitTaskPlanResponse {
+  // Overall decision.
+  PlanDecision decision = 1;
+  // Per-task verdicts for every task in the submitted plan.
+  repeated TaskVerdict task_verdicts = 2;
+}
+
+// MissionRef identifies a mission for status/event queries.
+message MissionRef {
+  // Mission ULID.
+  string mission_id = 1;
+}
+
+// MissionStatus is the commander's point-in-time view of a mission.
+message MissionStatus {
+  // The mission.
+  Mission mission = 1;
+  // Task counts keyed by TaskState name (e.g. "RUNNING": 3).
+  map<string, uint32> task_counts = 2;
+  // In-flight tasks for quota accounting (default budget 50 per commander,
+  // doc 01 §4.2 rule 4).
+  uint32 in_flight_tasks = 3;
+}
+
+// GetMissionStatusRequest asks for a mission snapshot.
+message GetMissionStatusRequest {
+  // Mission to describe.
+  MissionRef mission = 1;
+}
+
+// GetMissionStatusResponse returns the snapshot.
+message GetMissionStatusResponse {
+  // The status view.
+  MissionStatus status = 1;
+}
+
+// MissionEvent is one item on the mission.events stream (doc 01 §6.5): task
+// completions, failures, REJECTED_UNAUTHORIZED (replan signal), scope violations
+// (halt signal), Monitor triggers. The commander contract is event-driven
+// replanning, not polling.
+message MissionEvent {
+  // ULID of the event.
+  string event_id = 1;
+  // Mission the event belongs to.
+  string mission_id = 2;
+  // Event kind, e.g. "TASK_COMPLETED", "TASK_REJECTED_UNAUTHORIZED",
+  // "SCOPE_VIOLATION", "MONITOR_TRIGGER".
+  string kind = 3;
+  // Related task, when applicable.
+  string task_id = 4;
+  // Event time (UTC).
+  google.protobuf.Timestamp ts = 5;
+  // Kind-specific payload (e.g. embedded TaskResult or MonitorChange ref).
+  google.protobuf.Struct detail = 6;
+}
+
+// StreamMissionEventsRequest subscribes a commander to mission.events.
+message StreamMissionEventsRequest {
+  // Mission to stream.
+  MissionRef mission = 1;
+}
+
+// StreamMissionEventsResponse carries one mission event per message.
+message StreamMissionEventsResponse {
+  // The event.
+  MissionEvent event = 1;
+}
+
+// CapabilityQuery filters the live capability view from the Agent Registry.
+message CapabilityQuery {
+  // Optional substring filter on capability name.
+  string name_prefix = 1;
+  // Optional minimum risk-class ceiling filter (return capabilities whose
+  // risk_class_max ≤ this value).
+  RiskClass max_risk_class = 2;
+}
+
+// ListCapabilitiesRequest asks what is currently invocable.
+message ListCapabilitiesRequest {
+  // Filter.
+  CapabilityQuery query = 1;
+}
+
+// ListCapabilitiesResponse is the live registry view (doc 01 §7.2).
+message ListCapabilitiesResponse {
+  // Registered capabilities with the agent types offering them.
+  repeated RegisteredCapability capabilities = 1;
+}
+
+// RegisteredCapability pairs a capability with its offering agent type.
+message RegisteredCapability {
+  // The capability descriptor.
+  Capability capability = 1;
+  // Module kind offering it.
+  AgentType agent_type = 2;
+}
+
+// ScopeChangeRequest asks an operator to widen/narrow the mission's RoE scope
+// (doc 01 §7.2 names this message ScopeChangeRequest; renamed here for lint
+// conformance). Routed to the operator approval queue — NEVER auto-granted.
+message RequestScopeChangeRequest {
+  // Mission whose scope should change.
+  string mission_id = 1;
+  // Commander requesting the change.
+  Commander requested_by = 2;
+  // Human-readable justification shown to the operator.
+  string justification = 3;
+  // Proposed scope additions (domains, CIDRs, …).
+  repeated string requested_additions = 4;
+  // Proposed scope removals.
+  repeated string requested_removals = 5;
+}
+
+// RequestScopeChangeResponse acknowledges queueing (not granting).
+message RequestScopeChangeResponse {
+  // True when queued for operator review.
+  bool queued = 1;
+}
+
+// PlannerService — doc 01 §7.2's "PlannerAPI".
+service PlannerService {
+  // Submit a TaskPlan; returns ACCEPTED / PARTIAL / REJECTED with per-task reasons.
+  rpc SubmitTaskPlan(SubmitTaskPlanRequest) returns (SubmitTaskPlanResponse);
+  // Point-in-time mission status.
+  rpc GetMissionStatus(GetMissionStatusRequest) returns (GetMissionStatusResponse);
+  // Server-stream of mission events for event-driven replanning.
+  rpc StreamMissionEvents(StreamMissionEventsRequest) returns (stream StreamMissionEventsResponse);
+  // Live capability view from the Agent Registry.
+  rpc ListCapabilities(ListCapabilitiesRequest) returns (ListCapabilitiesResponse);
+  // Request an RoE scope change (operator approval queue; never auto-granted).
+  rpc RequestScopeChange(RequestScopeChangeRequest) returns (RequestScopeChangeResponse);
+}

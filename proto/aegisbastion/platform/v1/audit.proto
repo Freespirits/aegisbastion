@@ -1,0 +1,82 @@
+syntax = "proto3";
+
+package aegisbastion.platform.v1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+// Platform audit trail (doc 01 §5.9, §10.4): append-only, hash-chained event log.
+// INSERT-only DB role; updates/deletes denied at the DB layer. Async exporter
+// ships batches to immutable storage (Later). Retention: 400 days hot, 7 years
+// cold. The audit of record for authorization state lives in gatekeeper's
+// audit-service (Ruling B); this is the command layer's operational chain.
+option go_package = "github.com/aegisbastion/aegisbastion/gen/go/aegisbastion/platform/v1;platformv1";
+
+// AuditEventType — the platform audit event vocabulary (doc 01 §5.9).
+enum AuditEventType {
+  // Zero value; unset.
+  AUDIT_EVENT_TYPE_UNSPECIFIED = 0;
+  // A mission was created.
+  AUDIT_EVENT_TYPE_MISSION_CREATED = 1;
+  // A commander submitted a TaskPlan.
+  AUDIT_EVENT_TYPE_PLAN_SUBMITTED = 2;
+  // A dispatch PEP decision was recorded (links the gatekeeper decision record —
+  // the §1 invariant: no task ≥ R1 dispatched without one).
+  AUDIT_EVENT_TYPE_AUTHZ_DECISION = 3;
+  // A task was dispatched to an agent.
+  AUDIT_EVENT_TYPE_TASK_DISPATCHED = 4;
+  // An agent touched a target (per-probe record; the authoritative cross-check
+  // for scope-bound watch tokens, Ruling A.4).
+  AUDIT_EVENT_TYPE_TARGET_TOUCHED = 5;
+  // A task result was received.
+  AUDIT_EVENT_TYPE_TASK_RESULT = 6;
+  // An RoE was revoked (triggers kill of in-flight tasks under it).
+  AUDIT_EVENT_TYPE_ROE_REVOKED = 7;
+  // A kill switch was engaged (global / per-mission / per-agent).
+  AUDIT_EVENT_TYPE_KILL_SWITCH = 8;
+  // An out-of-scope touch, token misuse, or manifest mismatch was detected.
+  AUDIT_EVENT_TYPE_SCOPE_VIOLATION = 9;
+}
+
+// AuditActor identifies who caused an event.
+message AuditActor {
+  // Actor category: "service" | "commander" | "user" | "agent".
+  string kind = 1;
+  // Actor identity, e.g. "orchestrator-7f9c", "op_jane@example.com".
+  string id = 2;
+}
+
+// AuditSubject links an event to the entities it concerns.
+message AuditSubject {
+  // Related mission ULID (empty when not mission-scoped).
+  string mission_id = 1;
+  // Related task ULID (empty when not task-scoped).
+  string task_id = 2;
+  // Related gatekeeper RoE ULID (empty when not RoE-scoped).
+  string roe_id = 3;
+}
+
+// AuditEvent — one link in the hash chain (doc 01 §5.9).
+// hash = sha256(prev_hash || JCS-canonical(event minus hash)); canonicalization
+// is JCS, RFC 8785 (doc 01 §10.2).
+message AuditEvent {
+  // ULID, e.g. "aud_01J95Q…".
+  string event_id = 1;
+  // Monotonic sequence number (chain order).
+  uint64 seq = 2;
+  // Event time (UTC).
+  google.protobuf.Timestamp ts = 3;
+  // Event type.
+  AuditEventType type = 4;
+  // Who caused it.
+  AuditActor actor = 5;
+  // What it concerns.
+  AuditSubject subject = 6;
+  // Type-specific detail, e.g. {"decision": "ALLOW", "policy":
+  // "gatekeeper.policy-service/v1", "reason": "target in allowlist"}.
+  google.protobuf.Struct payload = 7;
+  // Hash of the previous event ("sha256:…"), empty for the genesis event.
+  string prev_hash = 8;
+  // Hash of this event ("sha256:…") over the canonical form above.
+  string hash = 9;
+}

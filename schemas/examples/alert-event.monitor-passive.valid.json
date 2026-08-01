@@ -1,0 +1,26 @@
+{
+  "schema_version": "1.0",
+  "event_id": "evt_01J9ZD4R8M",
+  "org_id": "org_acme",
+  "source_module": "monitor",
+  "source_event_id": "chg_01J9D6T2",
+  "fingerprint_hint": "fp_9c31e7ab",
+  "title": "TLS certificate for api.acme.com expires in 6 days",
+  "description": "Was 37 days. Passive-derived; pending authorized probe confirmation.",
+  "severity": "high",
+  "confidence": "probable",
+  "category": "config-drift",
+  "asset": {
+    "asset_id": "asset_88f3",
+    "kind": "subdomain",
+    "identifier": "api.acme.com",
+    "criticality": "high"
+  },
+  "evidence": {
+    "proof": { "snapshot_refs": { "before": "snp_01J90", "after": "snp_01J9E" } }
+  },
+  "pii_classification": "none",
+  "occurred_at": "2026-07-30T07:00:11Z",
+  "dedup_window_seconds": 86400,
+  "labels": { "surface": "external", "source": "passive_feed" }
+}

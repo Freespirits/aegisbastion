@@ -1,0 +1,35 @@
+{
+  "name": "@aegisbastion/alert",
+  "version": "0.1.0",
+  "description": "herald — the AegisBastion alert module (doc 05): sole notification egress (Ruling C7). Ingest AlertEvent v1 from *.alert bus subjects + REST, authz-context enforcement against gatekeeper JWKS (non-deferrable, §13.1), enrich/dedup/correlate/route/escalate, delivery to Slack/Teams/Splunk HEC/syslog/signed webhooks.",
+  "license": "UNLICENSED",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "@bufbuild/protobuf": "^2.2.3",
+    "@nats-io/jetstream": "^3.4.0",
+    "@nats-io/transport-node": "^3.4.0",
+    "@aegisbastion/agent-sdk": "file:vendor/aegisbastion-agent-sdk-0.1.0.tgz",
+    "@aegisbastion/gen": "file:vendor/aegisbastion-gen-0.1.0.tgz",
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
+    "handlebars": "^4.7.8",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.11.10",
+    "typescript": "^5.5.4",
+    "vitest": "^3.2.4"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

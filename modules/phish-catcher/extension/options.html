@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Phish-Catcher Options</title>
+    <style>
+      body { font: 14px/1.5 system-ui, sans-serif; margin: 24px auto; max-width: 640px; padding: 0 16px; color: #17202a; }
+      h1 { font-size: 18px; } h2 { font-size: 14px; margin-top: 28px; }
+      fieldset { border: 1px solid #e3e8ee; border-radius: 8px; padding: 12px 16px; }
+      label { display: block; margin: 8px 0; }
+      textarea { width: 100%; box-sizing: border-box; font: 12px monospace; }
+      button { cursor: pointer; border: 1px solid #c8d1dc; background: #fff; border-radius: 6px; padding: 6px 12px; }
+      #status { color: #1c7c3c; min-height: 18px; }
+      .note { color: #5f6b7a; font-size: 12px; }
+      #dev-section { display: none; }
+    </style>
+  </head>
+  <body>
+    <h1>Phish-Catcher Options</h1>
+
+    <h2>Telemetry</h2>
+    <fieldset>
+      <label>
+        <input type="checkbox" id="telemetry-enabled" />
+        Send redacted finding reports to my organization's hub (opt-in, default off — doc 07 §7.3)
+      </label>
+      <p class="note">
+        Reports contain salted hashes only — never URLs in cleartext, never email content
+        (redaction rules: doc 07 §5.4). Detection always works fully offline.
+      </p>
+    </fieldset>
+
+    <h2>Local brand list</h2>
+    <fieldset>
+      <p class="note">Extra domains to protect (one per line). Stored locally; merged with the signed intel bundle.</p>
+      <textarea id="local-brands" rows="4" placeholder="example.com&#10;example.org"></textarea>
+    </fieldset>
+
+    <h2>Intel</h2>
+    <fieldset>
+      <p id="intel-state" class="note">Bundle: —</p>
+      <p class="note">Bundles are Ed25519-signed and verified against pinned hub keys before application; rollbacks are rejected (doc 07 §4.4).</p>
+      <label>Pinned hub public key (base64url Ed25519): <input id="pin-input" type="text" size="48" /></label>
+      <label>Apply a signed bundle/policy file:
+        <input type="file" id="bundle-file" accept=".json,.sb,.bundle,.policy" />
+      </label>
+    </fieldset>
+
+    <fieldset id="dev-section">
+      <h2>Developer mode</h2>
+      <p class="note">Unsigned local policy overrides are allowed ONLY in dev builds (doc 07 §3.3).</p>
+      <label><input type="checkbox" id="dev-mode" /> Dev mode (unsigned policies)</label>
+    </fieldset>
+
+    <p><button id="save-btn">Save</button> <span id="status" role="status"></span></p>
+    <script src="dist/options.js"></script>
+  </body>
+</html>

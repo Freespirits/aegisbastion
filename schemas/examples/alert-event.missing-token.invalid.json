@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0",
+  "event_id": "evt_01J9ZC9V3Q",
+  "org_id": "org_acme",
+  "source_module": "detect",
+  "source_event_id": "fnd_01J9A7K2",
+  "title": "Confirmed RCE exposure without a token reference — must fail",
+  "severity": "critical",
+  "confidence": "confirmed",
+  "category": "vuln",
+  "asset": {
+    "asset_id": "asset_88f3",
+    "kind": "subdomain",
+    "identifier": "api.acme.com"
+  },
+  "occurred_at": "2026-07-30T06:59:41Z"
+}

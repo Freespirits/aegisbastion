@@ -1,0 +1,46 @@
+{
+  "name": "@aegisbastion/agent-sdk",
+  "version": "0.1.0",
+  "description": "AegisBastion platform agent SDK + gatekeeper PEP-SDK (merged per Ruling B): bus transport, registry StreamTasks client, Scope Token verification, scope/manifest guardrails, rate caps, revocation/kill handling, re-authorization, audit helpers, MinIO manifest fetch.",
+  "license": "UNLICENSED",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.879.0",
+    "@bufbuild/protobuf": "^2.2.3",
+    "@connectrpc/connect": "^2.1.0",
+    "@connectrpc/connect-node": "^2.1.0",
+    "@nats-io/jetstream": "^3.4.0",
+    "@nats-io/nats-core": "^3.4.0",
+    "@nats-io/transport-node": "^3.4.0",
+    "@aegisbastion/gen": "^0.1.0",
+    "canonicalize": "^2.1.0",
+    "jose": "^6.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsup": "^8.5.0",
+    "typescript": "^5.5.4",
+    "vitest": "^3.2.4"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

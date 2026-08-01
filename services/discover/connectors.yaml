@@ -1,0 +1,68 @@
+# Connector manifest (doc 02 §4.3): per-tenant enable flags + credential
+# references for the MVP connector set (doc 02 §8). Rate specs are
+# declarative defaults enforced per worker by the registry's token buckets
+# (module-local floors; authoritative caps come from the gatekeeper RoE).
+#
+# API keys are NOT stored here — workers resolve them per tenant at task
+# time from DISCOVER_SOURCE_KEYS_FILE / DISCOVER_CLOUD_CREDS_FILE (MVP-A
+# file-based vault stand-in; never in task payloads).
+connectors:
+  # CT pool (worker-ct)
+  - name: crt.sh
+    enabled: true
+    tenants: ["*"]
+    rate_spec: { rps: 0.5, burst: 2, daily_quota: 0 }
+  - name: censys_ct
+    enabled: true
+    tenants: ["*"]
+    rate_spec: { rps: 0.4, burst: 1, daily_quota: 250 }
+
+  # Passive pool (worker-passive)
+  - name: securitytrails
+    enabled: true
+    tenants: ["*"]
+    rate_spec: { rps: 1, burst: 2, daily_quota: 2000 }
+  - name: virustotal
+    enabled: true
+    tenants: ["*"]
+    rate_spec: { rps: 0.25, burst: 1, daily_quota: 500 }
+  - name: shodan_dns
+    enabled: true
+    tenants: ["*"]
+    rate_spec: { rps: 1, burst: 1, daily_quota: 0 }
+  - name: rapiddns
+    enabled: true
+    tenants: ["*"]
+    rate_spec: { rps: 1, burst: 2, daily_quota: 0 }
+  - name: wayback
+    enabled: true
+    tenants: ["*"]
+    rate_spec: { rps: 0.5, burst: 2, daily_quota: 0 }
+  - name: bgpview
+    enabled: true
+    tenants: ["*"]
+    rate_spec: { rps: 1, burst: 2, daily_quota: 0 }
+  - name: ripestat
+    enabled: true
+    tenants: ["*"]
+    rate_spec: { rps: 1, burst: 2, daily_quota: 0 }
+  - name: rdap
+    enabled: true
+    tenants: ["*"]
+    rate_spec: { rps: 0.5, burst: 1, daily_quota: 0 }
+
+  # Credentialed-cloud pool (worker-cloud) — read-only roles only
+  # (AWS ViewOnlyAccess/SecurityAudit, Azure Reader, GCP
+  # roles/iam.securityReviewer + Cloud Asset Viewer, doc 02 §6.3).
+  - name: aws_resource_explorer
+    enabled: true
+    tenants: ["*"]
+    rate_spec: { rps: 2, burst: 4, daily_quota: 0 }
+  - name: azure_resource_graph
+    enabled: true
+    tenants: ["*"]
+    rate_spec: { rps: 2, burst: 4, daily_quota: 0 }
+  - name: gcp_cloud_asset_inventory
+    enabled: true
+    tenants: ["*"]
+    rate_spec: { rps: 2, burst: 4, daily_quota: 0 }

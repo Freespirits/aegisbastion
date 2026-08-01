@@ -1,0 +1,288 @@
+syntax = "proto3";
+
+package aegisbastion.gatekeeper.v1;
+
+import "google/protobuf/timestamp.proto";
+import "aegisbastion/platform/v1/types.proto";
+
+// Rules-of-Engagement service — the store of record for RoE records (doc 11 §3.1,
+// converged with doc 01 §5.4 per Ruling B). Records are immutable: edits create a
+// new version with a new signature; old versions remain for audit.
+option go_package = "github.com/aegisbastion/aegisbastion/gen/go/aegisbastion/gatekeeper/v1;gatekeeperv1";
+
+// ROEStatus is the lifecycle state machine (doc 11 §2.1):
+// draft → pending_approval → active → suspended → expired → revoked.
+enum ROEStatus {
+  // Zero value; unset.
+  ROE_STATUS_UNSPECIFIED = 0;
+  // Authored, not yet submitted for approval.
+  ROE_STATUS_DRAFT = 1;
+  // Awaiting operator/GRC approval.
+  ROE_STATUS_PENDING_APPROVAL = 2;
+  // Authorizing work.
+  ROE_STATUS_ACTIVE = 3;
+  // Temporarily halted (e.g. audit hash-chain anomaly, doc 11 §7).
+  ROE_STATUS_SUSPENDED = 4;
+  // Validity window closed (never silently extended).
+  ROE_STATUS_EXPIRED = 5;
+  // Permanently revoked; kills all in-flight tasks under it (doc 01 §10.5).
+  ROE_STATUS_REVOKED = 6;
+}
+
+// LegalArtifact anchors an RoE to a signed authorization document (LoA/MSA/auth
+// form). MANDATORY and verified for any RoE permitting R2 or R3 (Ruling B.4):
+// verified_by must hold role grc-verifier and the artifact must live in immutable
+// storage (doc 11 §3.1).
+message LegalArtifact {
+  // Document kind, e.g. "signed_loa" (MSA-2026-014 §7, signed auth form af-2291).
+  string kind = 1;
+  // SHA-256 of the artifact bytes (hex).
+  string document_sha256 = 2;
+  // Immutable-storage URI, e.g. "blob://immutable/legal/acme-loa-2026.pdf".
+  string storage_uri = 3;
+  // Signatory identities.
+  repeated string signers = 4;
+  // Verifying identity — must hold role grc-verifier.
+  string verified_by = 5;
+  // Verification time (UTC).
+  google.protobuf.Timestamp verified_at = 6;
+}
+
+// Scope is the RoE target scope (doc 11 §3.1). explicit_excludes ALWAYS win over
+// includes — enforced at activation and again at decision time (docs 01 §5.4,
+// 03 §9.2, 11 §3.1 agree). Domains/CIDRs are resolved to a concrete, versioned
+// effective target list at activation and re-resolved on asset-inventory changes;
+// tokens bind to that resolved version. This message, JCS-canonicalized (RFC
+// 8785) and hashed, is also the scope document embedded in scope-bound watch
+// token manifests (Ruling A).
+message Scope {
+  // Asset groups from the data platform (module 09) included in scope.
+  repeated string asset_group_ids = 1;
+  // Domains and wildcards, e.g. "acme.com", "*.acme.com".
+  repeated string domains = 2;
+  // CIDR blocks, e.g. "203.0.113.0/24".
+  repeated string cidrs = 3;
+  // Cloud account/subscription ids.
+  repeated string cloud_accounts = 4;
+  // Hard exclusions (hosts, IPs, CIDRs) — always win over every include form.
+  repeated string explicit_excludes = 5;
+}
+
+// BlackoutWindow is a recurring window in which no active work may run
+// (doc 11 §3.1; evaluated in the declared tz at decision time, pipeline step 8).
+message BlackoutWindow {
+  // iCalendar RRULE, e.g. "FREQ=DAILY;BYHOUR=0-5".
+  string rrule = 1;
+  // IANA timezone, e.g. "Europe/Paris".
+  string tz = 2;
+}
+
+// RateCapEntry is a per-capability-pattern cap (doc 11 §3.1), e.g.
+// "scan.active" → {rps: 200}, "stress.*" → {rps: 5000, max_concurrent: 2}.
+message RateCapEntry {
+  // Requests per second.
+  uint32 rps = 1;
+  // Concurrency ceiling (0 = unset).
+  uint32 max_concurrent = 2;
+}
+
+// Constraints bound what an RoE permits (doc 11 §3.1, doc 01 §5.4).
+message Constraints {
+  // Highest risk class this RoE authorizes (doc 11 name; doc 01 §5.4 expresses the
+  // same bound as allowed_risk_classes — the max of that set).
+  aegisbastion.platform.v1.RiskClass max_risk_class = 1;
+  // Capability names/patterns the RoE permits, e.g. "recon.subdomain_enum",
+  // "detect.scan.web", "stress.http_flood", "redteam.api_probe".
+  repeated string allowed_capabilities = 2;
+  // Per-capability-pattern rate caps.
+  map<string, RateCapEntry> rate_caps = 3;
+  // Recurring blackout windows.
+  repeated BlackoutWindow blackout_windows = 4;
+  // Source regions from which work may originate, e.g. "EU", "US".
+  repeated string jurisdictions_allowed = 5;
+  // Data classes that may be touched, e.g. "PII", "PCI".
+  repeated string data_classes = 6;
+  // Bindings requiring four-eyes approval, e.g. "R3", "R2:stress.*:production"
+  // (Ruling B.4: approval mandatory for R3 and for R2 stress.* on production).
+  repeated string requires_approval_for = 7;
+  // MANDATORY for stress.* capabilities executing from the Azure engine —
+  // documents compliance with the Azure pen-testing rules of engagement
+  // (doc 11 §3.1; open question Q3 tracks ownership of filing/renewal).
+  string azure_pentest_notification_id = 8;
+}
+
+// RulesOfEngagement — the legally-grounded engagement record (doc 11 §3.1 /
+// doc 01 §5.4). Hard validation rules in roe-service:
+//   - valid_until ≤ 90 days from valid_from (renewal = new version).
+//   - explicit_excludes always win.
+//   - max_risk_class R2/R3 ⇒ legal_artifact mandatory + verified by grc-verifier.
+//   - stress.* from Azure ⇒ azure_pentest_notification_id mandatory.
+message RulesOfEngagement {
+  // ULID, e.g. "roe_01J9ZK3E6T".
+  string roe_id = 1;
+  // Owning organization, e.g. "org_acme".
+  string org_id = 2;
+  // Human-readable engagement name.
+  string name = 3;
+  // Lifecycle state.
+  ROEStatus status = 4;
+  // Author identity (roe-author role).
+  string created_by = 5;
+  // Customer-side authorizer (doc 01 §5.4), e.g. identity ciso@acme.com with role
+  // customer_authorizer. JSON form: {"identity": …, "role": …}.
+  Attestation authorized_by = 6;
+  // Operator approval attestation (doc 01 §5.4) — REQUIRED for R2/R3; four-eyes
+  // for R3 via approval-service.
+  Attestation approved_by_operator = 7;
+  // Signed legal artifact (mandatory + verified for R2/R3).
+  LegalArtifact legal_artifact = 8;
+  // Target scope (exclusions always win).
+  Scope scope = 9;
+  // Capability/rate/window/jurisdiction constraints.
+  Constraints constraints = 10;
+  // Window start (UTC).
+  google.protobuf.Timestamp valid_from = 11;
+  // Window end (UTC) — ≤ 90 days from valid_from.
+  google.protobuf.Timestamp valid_until = 12;
+  // Immutable version number; edits create a new version.
+  uint64 version = 13;
+  // Last update time (UTC).
+  google.protobuf.Timestamp updated_at = 14;
+  // base64url(Ed25519_sign(gatekeeper_signing_key, JCS_canonical(roe))) — RoE
+  // canonicalization is JCS, RFC 8785 (doc 01 §10.2).
+  string signature = 15;
+}
+
+// Attestation records who authorized/approved and when (doc 01 §5.4 JSON form).
+message Attestation {
+  // Identity, e.g. "ciso@acme.com".
+  string identity = 1;
+  // Role, e.g. "customer_authorizer".
+  string role = 2;
+  // Attestation time (UTC).
+  google.protobuf.Timestamp at = 3;
+}
+
+// CreateROERequest drafts a new RoE (RBAC: roe-author).
+message CreateROERequest {
+  // The record to create (roe_id/version/signature server-assigned).
+  RulesOfEngagement roe = 1;
+}
+
+// CreateROEResponse returns the persisted draft.
+message CreateROEResponse {
+  // The created record (status DRAFT, version 1).
+  RulesOfEngagement roe = 1;
+}
+
+// GetROERequest fetches a record.
+message GetROERequest {
+  // RoE ULID.
+  string roe_id = 1;
+  // Specific version (0 = latest).
+  uint64 version = 2;
+}
+
+// GetROEResponse returns the record.
+message GetROEResponse {
+  // The requested record/version.
+  RulesOfEngagement roe = 1;
+}
+
+// ListROEsRequest filters records.
+message ListROEsRequest {
+  // Owning org (required — tenancy boundary).
+  string org_id = 1;
+  // Optional status filter.
+  ROEStatus status = 2;
+  // Pagination cursor.
+  string page_token = 3;
+  // Page size.
+  uint32 page_size = 4;
+}
+
+// ListROEsResponse returns matching records.
+message ListROEsResponse {
+  // Matching records.
+  repeated RulesOfEngagement roes = 1;
+  // Next-page cursor (empty when exhausted).
+  string next_page_token = 2;
+}
+
+// UpdateROERequest creates a NEW VERSION of an existing record (records are
+// immutable; old versions remain for audit).
+message UpdateROERequest {
+  // RoE ULID being versioned.
+  string roe_id = 1;
+  // The new record content (version/signature server-assigned).
+  RulesOfEngagement roe = 2;
+}
+
+// UpdateROEResponse returns the new version.
+message UpdateROEResponse {
+  // The new version.
+  RulesOfEngagement roe = 1;
+}
+
+// ActivateROERequest transitions draft/pending_approval → active: validates the
+// hard rules and computes the resolved, versioned effective target list.
+message ActivateROERequest {
+  // RoE ULID.
+  string roe_id = 1;
+  // Version to activate.
+  uint64 version = 2;
+}
+
+// ActivateROEResponse returns the activated record.
+message ActivateROEResponse {
+  // The activated record.
+  RulesOfEngagement roe = 1;
+}
+
+// SuspendROERequest halts an active RoE (e.g. pending GRC review).
+message SuspendROERequest {
+  // RoE ULID.
+  string roe_id = 1;
+  // Reason, recorded in the audit chain.
+  string reason = 2;
+}
+
+// SuspendROEResponse returns the suspended record.
+message SuspendROEResponse {
+  // The suspended record.
+  RulesOfEngagement roe = 1;
+}
+
+// RevokeROERequest permanently revokes an RoE — triggers kill of all in-flight
+// tasks under it and a revocation broadcast (doc 01 §10.5, doc 11 §2.3).
+message RevokeROERequest {
+  // RoE ULID.
+  string roe_id = 1;
+  // Reason, recorded in the audit chain.
+  string reason = 2;
+}
+
+// RevokeROEResponse returns the revoked record.
+message RevokeROEResponse {
+  // The revoked record.
+  RulesOfEngagement roe = 1;
+}
+
+// ROEService — CRUD + lifecycle for Rules-of-Engagement records (doc 11 §2.1.1).
+// Publishes roe.events.v1 on every state change.
+service ROEService {
+  // Create a draft RoE.
+  rpc CreateROE(CreateROERequest) returns (CreateROEResponse);
+  // Fetch an RoE (latest or specific version).
+  rpc GetROE(GetROERequest) returns (GetROEResponse);
+  // List RoEs for an org.
+  rpc ListROEs(ListROEsRequest) returns (ListROEsResponse);
+  // Create a new immutable version of an RoE.
+  rpc UpdateROE(UpdateROERequest) returns (UpdateROEResponse);
+  // Activate a draft/pending RoE (validates hard rules, resolves target list).
+  rpc ActivateROE(ActivateROERequest) returns (ActivateROEResponse);
+  // Suspend an active RoE.
+  rpc SuspendROE(SuspendROERequest) returns (SuspendROEResponse);
+  // Revoke an RoE (kills in-flight tasks under it).
+  rpc RevokeROE(RevokeROERequest) returns (RevokeROEResponse);
+}

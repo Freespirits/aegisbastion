@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aegisbastion.io/schemas/gatekeeper/v1/scope-manifest.schema.json",
+  "title": "Canonical Scope Manifest v1 (scope-bound watch token)",
+  "description": "The manifest document carried by a scope-bound watch token (Ruling A, doc 01 §5.5, doc 11 §3.2): the canonical RoE target scope — domains, CIDRs, exclusions — resolved by gatekeeper roe-service at activation (doc 11 §3.1). The manifest is serialized canonically with JCS (RFC 8785, doc 01 §10.2) before hashing; sha256(JCS(manifest)) IS the token claim targets.manifest_sha256 and the audit value \"scope:sha256:<hash>\". The agent SDK/PEP evaluates each probe target against this scope using doc 01 §10.1's canonicalized matching (longest-prefix/exact-host); explicit_excludes ALWAYS WIN over every include form. Fail-closed: a scan job without a valid in-scope token is dead-lettered and audit-logged.",
+  "type": "object",
+  "required": ["roe_id", "roe_version", "scope"],
+  "additionalProperties": false,
+  "properties": {
+    "roe_id": {
+      "description": "RoE this scope was resolved from.",
+      "type": "string",
+      "pattern": "^roe_"
+    },
+    "roe_version": {
+      "description": "RoE version the scope binds to; PEPs re-validate and halt on version change.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "resolved_at": {
+      "description": "When roe-service (re-)resolved the effective scope (RFC 3339).",
+      "type": "string",
+      "format": "date-time"
+    },
+    "scope": {
+      "description": "The canonical RoE scope (doc 11 §3.1). explicit_excludes always win over includes — enforced at decision time and per-probe in the SDK.",
+      "type": "object",
+      "required": ["domains", "cidrs", "explicit_excludes"],
+      "additionalProperties": false,
+      "properties": {
+        "asset_group_ids": {
+          "description": "Asset groups from the data platform (module 09) included in scope.",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "domains": {
+          "description": "Domains and wildcards, e.g. [\"acme.com\", \"*.acme.com\"].",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "cidrs": {
+          "description": "CIDR blocks, e.g. [\"203.0.113.0/24\"].",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "cloud_accounts": {
+          "description": "Cloud account/subscription ids.",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "explicit_excludes": {
+          "description": "Hard exclusions (hosts, IPs, CIDRs) — always win over every include form.",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

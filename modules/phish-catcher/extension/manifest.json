@@ -1,0 +1,37 @@
+{
+  "manifest_version": 3,
+  "name": "AegisBastion Phish-Catcher",
+  "version": "0.1.0",
+  "description": "Client-side phishing detection. Zero external transmission: every verdict is computed locally from signed intel bundles (doc 07 §7).",
+  "permissions": ["activeTab", "storage", "alarms"],
+  "host_permissions": [
+    "https://mail.google.com/*",
+    "https://outlook.live.com/*",
+    "https://outlook.office.com/*"
+  ],
+  "background": {
+    "service_worker": "dist/service-worker.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://mail.google.com/*",
+        "https://outlook.live.com/*",
+        "https://outlook.office.com/*"
+      ],
+      "js": ["dist/content-script.js"],
+      "run_at": "document_idle",
+      "world": "ISOLATED"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Phish-Catcher verdict"
+  },
+  "options_page": "options.html",
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self'; style-src 'self'; img-src 'self' data:",
+    "sandbox": "sandbox allow-scripts; script-src 'self'"
+  },
+  "web_accessible_resources": []
+}

@@ -1,0 +1,21 @@
+{
+  "iss": "gatekeeper.platform",
+  "aud": "aegisbastion.modules",
+  "jti": "tok_01J93AM7KQ",
+  "sub": "agent_01J92FW8",
+  "task_id": "tsk_01J92H44",
+  "roe_id": "roe_01J8ZM22",
+  "roe_version": 3,
+  "risk_class": "R1",
+  "capabilities": ["monitor.watch"],
+  "targets": {
+    "hash_alg": "sha256",
+    "manifest_uri": "blob://tokens/tok_01J93AM7KQ/scope.json",
+    "manifest_sha256": "7d3e2b1c9a8f4e6d5c3b2a19080706050403020100ffeeddccbbaa9988776655"
+  },
+  "scope_bound": true,
+  "rate_caps": { "max_rps": 50 },
+  "iat": 1759650000,
+  "nbf": 1759650000,
+  "exp": 1759650900
+}

@@ -1,0 +1,12 @@
+{
+  "roe_id": "roe_01J8ZM22",
+  "roe_version": 3,
+  "resolved_at": "2026-07-30T06:00:00Z",
+  "scope": {
+    "asset_group_ids": ["ag_external_prod"],
+    "domains": ["acme.com", "*.acme.com"],
+    "cidrs": ["203.0.113.0/24"],
+    "cloud_accounts": ["azure_sub_8f3"],
+    "explicit_excludes": ["status.acme.com", "203.0.113.99"]
+  }
+}

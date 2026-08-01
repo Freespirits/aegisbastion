@@ -1,0 +1,35 @@
+From: "Example News" <newsletter@example.com>
+Reply-To: "Example News" <newsletter@example.com>
+Return-Path: <bounces@example.com>
+Message-ID: <nl-2026-07@example.com>
+Authentication-Results: mx.example.org; spf=pass smtp.mailfrom=example.com; dkim=pass header.d=example.com; dmarc=pass header.from=example.com
+Subject: Your July product updates
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="alt-0001"
+
+--alt-0001
+Content-Type: text/plain; charset="utf-8"
+
+Hello Ada,
+
+Here are this month's product updates from Example:
+- Dark mode is now generally available.
+- New keyboard shortcuts for the dashboard.
+
+Read more at https://example.com/blog/july-updates
+
+You are receiving this because you subscribed at example.com.
+Unsubscribe: https://example.com/preferences/unsubscribe
+
+--alt-0001
+Content-Type: text/html; charset="utf-8"
+
+<html><body>
+<p>Hello Ada,</p>
+<p>Here are this month's product updates from Example:</p>
+<ul><li>Dark mode is now generally available.</li><li>New keyboard shortcuts for the dashboard.</li></ul>
+<p><a href="https://example.com/blog/july-updates">Read more on example.com</a></p>
+<p>You are receiving this because you subscribed at example.com.</p>
+</body></html>
+
+--alt-0001--

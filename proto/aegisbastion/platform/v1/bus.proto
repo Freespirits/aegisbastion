@@ -1,0 +1,42 @@
+syntax = "proto3";
+
+package aegisbastion.platform.v1;
+
+import "google/protobuf/any.proto";
+import "google/protobuf/timestamp.proto";
+import "aegisbastion/platform/v1/types.proto";
+
+// Bus envelope (doc 01 §8.2) for every message on the NATS JetStream bus.
+// Canonical subjects (doc 01 §8.1; Ruling C3 — JetStream is the canonical bus):
+//   task.assign.{agent_id}  Orchestrator → agent        WorkQueue, ack-required
+//   task.result             agents → Orchestrator       durable, at-least-once
+//   agent.heartbeat         agents → Registry           ephemeral, 10 s cadence
+//   mission.events          Orchestrator → commanders   durable
+//   monitor.changes         Monitor → commanders        durable
+//   control.kill            Orchestrator → all agents   core NATS broadcast, ACK ≤ 5 s
+//   audit.events            all services → Audit        durable, never sampled
+//   alert.outbound          Alert ↔ notifiers           durable
+// Gatekeeper adds (doc 11 §2.3): authz.decisions.v1, authz.denials.v1,
+// roe.events.v1, tasks.revocations.v1, authz.approvals.v1, audit.anomalies.v1.
+// Module event subjects: monitor.changes / monitor.alert / monitor.assets.new
+// (doc 03 §5), detect.findings / detect.alert (doc 04 §4.3, Ruling C8),
+// {detect,monitor,discover,ddos,redteam,phish}.alert (doc 05 §5.9).
+option go_package = "github.com/aegisbastion/aegisbastion/gen/go/aegisbastion/platform/v1;platformv1";
+
+// Envelope wraps every bus payload (doc 01 §8.2). Consumers MUST be idempotent
+// on event_id / task_id (duplicate delivery is expected under at-least-once).
+message Envelope {
+  // ULID, unique per published message.
+  string event_id = 1;
+  // Fully-qualified payload type, e.g. "aegisbastion.monitor.v1.MonitorChange".
+  string type = 2;
+  // Publish time (UTC).
+  google.protobuf.Timestamp ts = 3;
+  // Owning mission when applicable (empty for platform-internal messages).
+  string mission_id = 4;
+  // W3C trace context propagated from the triggering assignment/event.
+  TraceContext trace_context = 5;
+  // The typed payload (e.g. TaskAssignment, TaskResult, MonitorChange,
+  // FindingReport, gatekeeper DecisionEvent / RevocationEvent).
+  google.protobuf.Any payload = 6;
+}

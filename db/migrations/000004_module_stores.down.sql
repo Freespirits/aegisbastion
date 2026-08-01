@@ -1,0 +1,28 @@
+-- 000004_module_stores.down.sql
+BEGIN;
+DROP TABLE IF EXISTS detect.suppressions;
+DROP TABLE IF EXISTS detect.fingerprints;
+DROP TABLE IF EXISTS detect.findings_fallback;
+DROP SCHEMA IF EXISTS detect;
+DROP TABLE IF EXISTS monitor.scan_jobs_dead;
+DROP TABLE IF EXISTS monitor.suppressions;
+DROP TABLE IF EXISTS monitor.exposure_state;
+DROP TABLE IF EXISTS monitor.baseline_state;
+DROP TABLE IF EXISTS monitor.baselines;
+DROP TABLE IF EXISTS monitor.dedup_window;
+DROP TABLE IF EXISTS monitor.event_outbox;
+DROP TABLE IF EXISTS monitor.change_events_default;
+DROP TABLE IF EXISTS monitor.change_events;
+DROP TABLE IF EXISTS monitor.snapshots_history_default;
+DROP TABLE IF EXISTS monitor.snapshots_history;
+DROP TABLE IF EXISTS monitor.snapshots_latest;
+DROP TABLE IF EXISTS monitor.watch_assets;
+DROP SCHEMA IF EXISTS monitor;
+DROP TABLE IF EXISTS discover.audit_spool;
+DROP TABLE IF EXISTS discover.quarantined_findings;
+DROP TABLE IF EXISTS discover.findings;
+DROP TABLE IF EXISTS discover.discovery_orders;
+DROP TABLE IF EXISTS discover.asset_edges;
+DROP TABLE IF EXISTS discover.assets;
+DROP SCHEMA IF EXISTS discover;
+COMMIT;

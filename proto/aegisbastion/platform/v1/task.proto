@@ -1,0 +1,138 @@
+syntax = "proto3";
+
+package aegisbastion.platform.v1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+import "aegisbastion/platform/v1/types.proto";
+
+// Task lifecycle: dispatch envelope, state machine, and result (doc 01 §5.6,
+// §5.7, §6.2).
+option go_package = "github.com/aegisbastion/aegisbastion/gen/go/aegisbastion/platform/v1;platformv1";
+
+// TaskState is the Orchestrator-owned task state machine (doc 01 §6.2).
+// Transitions are DB writes by the Orchestrator only, each emitting an audit event.
+enum TaskState {
+  // Zero value; unset.
+  TASK_STATE_UNSPECIFIED = 0;
+  // Received in a plan, awaiting validation.
+  TASK_STATE_PENDING = 1;
+  // Being validated (capability, risk class, scope, quota).
+  TASK_STATE_VALIDATING = 2;
+  // Passed validation; waiting on the Scheduler.
+  TASK_STATE_QUEUED = 3;
+  // Dispatch PEP allowed; Scope Token minted; published to task.assign.{agent_id}.
+  TASK_STATE_DISPATCHED = 4;
+  // Agent ACKed and is executing.
+  TASK_STATE_RUNNING = 5;
+  // Agent posted a TaskResult.
+  TASK_STATE_REPORTED = 6;
+  // Result validated (incl. targets_touched cross-check).
+  TASK_STATE_VALIDATED = 7;
+  // Terminal success.
+  TASK_STATE_COMPLETED = 8;
+  // Failed a gate; returned to the commander for replanning.
+  TASK_STATE_REJECTED_UNAUTHORIZED = 9;
+  // Missed its dispatch window.
+  TASK_STATE_EXPIRED = 10;
+  // Execution failure (retried up to max_retries).
+  TASK_STATE_FAILED = 11;
+  // Terminal after retries exhausted.
+  TASK_STATE_DEAD = 12;
+  // Kill switch, RoE revocation, or timeout halt.
+  TASK_STATE_KILLED = 13;
+  // Operator-cancelled before dispatch.
+  TASK_STATE_CANCELLED = 14;
+}
+
+// ArtifactUpload tells the agent where evidence may go — the pre-signed artifact
+// prefix only (doc 01 §9 item 6).
+message ArtifactUpload {
+  // Artifact bucket (MinIO at MVP-A).
+  string bucket = 1;
+  // Key prefix scoped to mission/task, e.g. "msn_01J8ZK/tsk_01J92H/".
+  string prefix = 2;
+}
+
+// TaskAssignment — Orchestrator → agent, on the bus (task.assign.{agent_id}) or
+// via AgentAPI.StreamTasks (doc 01 §5.6, §8.3).
+message TaskAssignment {
+  // Server-assigned ULID, e.g. "tsk_01J92H…".
+  string task_id = 1;
+  // Owning mission.
+  string mission_id = 2;
+  // Plan this task came from (propagated into every decision/audit event so a full
+  // commander plan is reconstructible from the audit trail, doc 11 §4).
+  string plan_id = 3;
+  // Capability to invoke.
+  string capability = 4;
+  // Authorized risk class for this execution.
+  RiskClass risk_class = 5;
+  // Concrete targets (as authorized by the dispatch PEP).
+  repeated string targets = 6;
+  // Capability-specific parameters (module-owned wire schema as Struct).
+  google.protobuf.Struct params = 7;
+  // Per-task timeout in seconds.
+  uint32 timeout_s = 8;
+  // Hard execution deadline; the per-target intrusive lease TTL equals this.
+  google.protobuf.Timestamp deadline = 9;
+  // Compact gatekeeper Scope Token JWT (EdDSA). Empty for R0 tasks — R0 requires
+  // no per-target token (doc 11 §1).
+  string authorization_token = 10;
+  // Where the agent may upload evidence.
+  ArtifactUpload artifact_upload = 11;
+  // W3C trace context for the agent's spans and structured logs.
+  TraceContext trace_context = 12;
+}
+
+// TaskResult — agent → Orchestrator (doc 01 §5.7). Agents must report honest
+// targets_touched; the Audit Service cross-checks it against the token scope and
+// raises SCOPE_VIOLATION on any out-of-scope touch (doc 01 §10.5).
+message TaskResult {
+  // Task this result belongs to (idempotency key for redelivery-safe consumers).
+  string task_id = 1;
+  // Reporting agent.
+  string agent_id = 2;
+  // Terminal status of the execution.
+  TaskResultStatus status = 3;
+  // Execution start (UTC).
+  google.protobuf.Timestamp started_at = 4;
+  // Execution end (UTC).
+  google.protobuf.Timestamp finished_at = 5;
+  // Module-defined rollup (e.g. findings count, severity_max; Monitor watch
+  // checkpoints per monitor/v1 WatchCheckpointSummary).
+  google.protobuf.Struct summary = 6;
+  // Evidence objects uploaded under the assignment's artifact prefix.
+  repeated string artifact_refs = 7;
+  // Execution metrics.
+  TaskResultMetrics metrics = 8;
+  // Structured error on FAILED; null-equivalent (absent) otherwise.
+  string error = 9;
+}
+
+// TaskResultMetrics — execution counters reported with a TaskResult.
+message TaskResultMetrics {
+  // Total network requests sent.
+  uint64 requests_sent = 1;
+  // Exact targets contacted. For scope-bound watch tokens (Ruling A) a checkpoint
+  // entry of the form "scope:sha256:<manifest hash>" is accepted ONLY alongside
+  // the per-probe TARGET_TOUCHED audit records, which remain the authoritative
+  // cross-check (doc 01 §5.5 rule 4, §5.7).
+  repeated string targets_touched = 2;
+}
+
+// TaskResultStatus is the agent-reported terminal status (doc 01 §5.7).
+enum TaskResultStatus {
+  // Zero value; unset.
+  TASK_RESULT_STATUS_UNSPECIFIED = 0;
+  // Work completed.
+  TASK_RESULT_STATUS_SUCCEEDED = 1;
+  // Work failed (structured error in TaskResult.error).
+  TASK_RESULT_STATUS_FAILED = 2;
+  // SDK-side guardrail refused (token/scope/rate mismatch) — replan signal.
+  TASK_RESULT_STATUS_REJECTED_UNAUTHORIZED = 3;
+  // Halted by kill switch / revocation within the 5 s SLA.
+  TASK_RESULT_STATUS_KILLED = 4;
+  // Exceeded timeout/deadline.
+  TASK_RESULT_STATUS_TIMEOUT = 5;
+}

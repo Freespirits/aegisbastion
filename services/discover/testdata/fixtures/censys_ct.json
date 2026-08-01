@@ -1,0 +1,22 @@
+{
+  "result": {
+    "hits": [
+      {
+        "names": ["example.com", "vpn.example.com"],
+        "fingerprint_sha256": "AA55BB66CC77DD88EE99FF00112233445566778899AABBCCDDEEFF00112233AA",
+        "parsed": {
+          "subject_common_name": "example.com",
+          "validity_period": { "not_after": "2027-03-01T00:00:00Z" }
+        }
+      },
+      {
+        "names": ["vpn.example.com", "remote.example.com"],
+        "fingerprint_sha256": "bb55bb66cc77dd88ee99ff00112233445566778899aabbccddeeff00112233bb",
+        "parsed": {
+          "subject_common_name": "vpn.example.com",
+          "validity_period": { "not_after": "2027-04-01T00:00:00Z" }
+        }
+      }
+    ]
+  }
+}

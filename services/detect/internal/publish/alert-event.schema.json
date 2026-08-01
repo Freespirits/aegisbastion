@@ -1,0 +1,174 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aegisbastion.io/schemas/alert/v1/alert-event.schema.json",
+  "title": "AlertEvent v1",
+  "description": "Canonical alert (doc 05 §5.2). Carried as `data` inside a CloudEvents 1.0 envelope (source //aegisbastion/<module>, type com.aegisbastion.alert.v1) on the <module>.alert subjects. Validation rules beyond the shape: `occurred_at` must be within ±24 h of ingest (checked at ingest, not expressible here); payload max 64 KiB — larger evidence goes to object storage and is referenced by URL. `authorization_token_id` is the jti of a gatekeeper-issued Scope Token (doc 11 §3.2); it is MANDATORY when source_module is ddos-engine or ai-redteam, or when category ∈ (vuln, exposure) with confidence = confirmed from an active scan (the conditional below encodes the statically checkable part).",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "event_id",
+    "org_id",
+    "source_module",
+    "source_event_id",
+    "title",
+    "severity",
+    "confidence",
+    "category",
+    "asset",
+    "occurred_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "description": "Contract version — fixed \"1.0\" for AlertEvent v1.",
+      "type": "string",
+      "const": "1.0"
+    },
+    "event_id": {
+      "description": "ULID, e.g. \"evt_01J9ZC9V3Q…\".",
+      "type": "string",
+      "minLength": 1
+    },
+    "org_id": {
+      "description": "Owning organization, e.g. \"org_acme\".",
+      "type": "string",
+      "minLength": 1
+    },
+    "source_module": {
+      "description": "Producing module.",
+      "type": "string",
+      "enum": ["detect", "monitor", "discover", "ddos-engine", "ai-redteam", "phish-catcher", "commander"]
+    },
+    "source_event_id": {
+      "description": "Id of the originating module event (e.g. the MonitorChange chg_… or FindingReport fnd_…).",
+      "type": "string",
+      "minLength": 1
+    },
+    "engagement_id": {
+      "description": "Optional engagement identifier, e.g. \"eng_2210\".",
+      "type": "string"
+    },
+    "authorization_token_id": {
+      "description": "jti of the gatekeeper Scope Token (doc 11 §3.2) that authorized the underlying activity. Mandatory for ddos-engine / ai-redteam sources and for confirmed active-scan vuln/exposure alerts (see allOf below). Passive-derived alerts carry the RoE id instead and are marked confidence: probable until an authorized probe confirms (doc 03 §5.3).",
+      "type": "string",
+      "pattern": "^tok_"
+    },
+    "fingerprint_hint": {
+      "description": "Producer-side dedup hint, e.g. \"cve-2024-3094|asset_88f3|443/tcp\". Monitor sets this to the MonitorChange fingerprint with dedup_window_seconds 86400 (doc 03 §5.3).",
+      "type": "string"
+    },
+    "title": {
+      "description": "Short alert title.",
+      "type": "string",
+      "minLength": 1
+    },
+    "description": {
+      "description": "Longer human-readable detail.",
+      "type": "string"
+    },
+    "severity": {
+      "type": "string",
+      "enum": ["critical", "high", "medium", "low", "info"]
+    },
+    "confidence": {
+      "type": "string",
+      "enum": ["confirmed", "probable", "possible"]
+    },
+    "category": {
+      "type": "string",
+      "enum": ["vuln", "exposure", "config-drift", "new-asset", "phishing", "ai-exploit", "stress-test", "operational"]
+    },
+    "asset": {
+      "description": "Asset the alert concerns.",
+      "type": "object",
+      "required": ["asset_id", "kind", "identifier"],
+      "additionalProperties": false,
+      "properties": {
+        "asset_id": {
+          "description": "Asset id from the data platform, e.g. \"asset_88f3\".",
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["domain", "subdomain", "ip", "cloud-resource", "email", "ai-agent"]
+        },
+        "identifier": {
+          "description": "e.g. \"api.example.com\".",
+          "type": "string",
+          "minLength": 1
+        },
+        "criticality": {
+          "type": "string",
+          "enum": ["critical", "high", "medium", "low"]
+        },
+        "owner_group": {
+          "type": "string"
+        }
+      }
+    },
+    "evidence": {
+      "description": "Compact evidence: {scanner, proof, references}. Large evidence lives in object storage and is referenced by URL (payload ≤ 64 KiB).",
+      "type": "object",
+      "properties": {
+        "scanner": { "type": "string" },
+        "proof": {},
+        "references": {
+          "type": "array",
+          "items": { "type": "string", "format": "uri" }
+        }
+      }
+    },
+    "pii_classification": {
+      "type": "string",
+      "enum": ["none", "pii", "pci", "hipaa"],
+      "default": "none"
+    },
+    "occurred_at": {
+      "description": "RFC 3339 timestamp; must be within ±24 h of ingest.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "dedup_window_seconds": {
+      "description": "Producer-suggested dedup window (Monitor uses 86400).",
+      "type": "integer",
+      "minimum": 0
+    },
+    "renotify_every": {
+      "description": "Re-notification interval in seconds; 0 = never renotify.",
+      "type": "integer",
+      "minimum": 0,
+      "default": 0
+    },
+    "requires_ack": {
+      "type": "boolean",
+      "default": false
+    },
+    "labels": {
+      "description": "Free-form labels, e.g. {\"playbook\": \"internet-facing-rce\"}.",
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    }
+  },
+  "allOf": [
+    {
+      "description": "authorization_token_id is mandatory for ddos-engine and ai-redteam sources (doc 05 §5.2).",
+      "if": {
+        "properties": {
+          "source_module": { "enum": ["ddos-engine", "ai-redteam"] }
+        }
+      },
+      "then": { "required": ["authorization_token_id"] }
+    },
+    {
+      "description": "authorization_token_id is mandatory for confirmed vuln/exposure alerts from active scans (doc 05 §5.2, §13.1; Ruling C8 for detect.alert; doc 03 §5.3 for monitor.alert exposure alerts).",
+      "if": {
+        "properties": {
+          "category": { "enum": ["vuln", "exposure"] },
+          "confidence": { "const": "confirmed" }
+        }
+      },
+      "then": { "required": ["authorization_token_id"] }
+    }
+  ]
+}

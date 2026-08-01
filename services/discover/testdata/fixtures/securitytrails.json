@@ -1,0 +1,5 @@
+{
+  "subdomains": ["www", "api", "dev.api", "WWW"],
+  "endpoint": "/v1/domain/example.com/subdomains",
+  "count": 4
+}

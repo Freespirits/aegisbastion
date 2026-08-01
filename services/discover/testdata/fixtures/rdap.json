@@ -1,0 +1,14 @@
+{
+  "objectClassName": "domain",
+  "handle": "EXAMPLE.COM",
+  "ldhName": "example.com",
+  "status": ["client transfer prohibited"],
+  "nameservers": [
+    { "objectClassName": "nameserver", "ldhName": "ns1.example.com" },
+    { "objectClassName": "nameserver", "ldhName": "ns2.example.com" }
+  ],
+  "events": [
+    { "eventAction": "registration", "eventDate": "1995-08-14T04:00:00Z" },
+    { "eventAction": "expiration", "eventDate": "2027-08-13T04:00:00Z" }
+  ]
+}

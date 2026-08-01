@@ -1,0 +1,146 @@
+syntax = "proto3";
+
+package aegisbastion.gatekeeper.v1;
+
+import "google/protobuf/timestamp.proto";
+import "aegisbastion/platform/v1/types.proto";
+
+// approval-service — four-eyes approval workflow for R3 and for R2 stress.* on
+// production targets (doc 11 §2.1.8, Ruling B.4). Two DISTINCT human approvers
+// holding offensive-approver; segregation of duties: approver ≠ RoE author ≠
+// requester. Approvals expire after 72 h and bind to a target superset.
+option go_package = "github.com/aegisbastion/aegisbastion/gen/go/aegisbastion/gatekeeper/v1;gatekeeperv1";
+
+// ApprovalState is the approval lifecycle.
+enum ApprovalState {
+  // Zero value; unset.
+  APPROVAL_STATE_UNSPECIFIED = 0;
+  // Waiting for approver decisions.
+  APPROVAL_STATE_PENDING = 1;
+  // Two distinct valid approvals recorded — usable by policy step 7.
+  APPROVAL_STATE_GRANTED = 2;
+  // Rejected by an approver.
+  APPROVAL_STATE_REJECTED = 3;
+  // 72 h elapsed without completion.
+  APPROVAL_STATE_EXPIRED = 4;
+}
+
+// ApproverDecision records one approver's vote.
+message ApproverDecision {
+  // Approver identity — must hold offensive-approver, must not be the RoE author
+  // or the requester, and the two approvers must be distinct (SoD).
+  string approver = 1;
+  // True = approve, false = reject.
+  bool approved = 2;
+  // Decision time (UTC).
+  google.protobuf.Timestamp at = 3;
+  // Optional note.
+  string note = 4;
+}
+
+// Approval — a four-eyes approval record ("appr_…"). The approval_id is embedded
+// in Scope Tokens when required (doc 01 §5.5).
+message Approval {
+  // Approval ULID, e.g. "appr_01J9ZM2C9R".
+  string approval_id = 1;
+  // RoE the approval sits under.
+  string roe_id = 2;
+  // RoE version.
+  uint64 roe_version = 3;
+  // Capability being approved, e.g. "redteam.api_probe", "stress.http_flood".
+  string capability = 4;
+  // Risk class of the approved work (R3, or R2 for production stress.*).
+  aegisbastion.platform.v1.RiskClass risk_class = 5;
+  // Approved target set — executed targets must be a SUBSET (pipeline step 7).
+  repeated string targets = 6;
+  // Requesting identity (commander service account or operator).
+  string requester = 7;
+  // Lifecycle state.
+  ApprovalState state = 8;
+  // Approver votes (need 2 distinct grants for GRANTED).
+  repeated ApproverDecision decisions = 9;
+  // Request time (UTC).
+  google.protobuf.Timestamp created_at = 10;
+  // Hard expiry — created_at + 72 h (doc 11 §3.3 step 7).
+  google.protobuf.Timestamp expires_at = 11;
+}
+
+// RequestApprovalRequest opens an approval (CLI/API at MVP, doc 11 §9.8).
+message RequestApprovalRequest {
+  // RoE ULID.
+  string roe_id = 1;
+  // RoE version.
+  uint64 roe_version = 2;
+  // Capability.
+  string capability = 3;
+  // Risk class.
+  aegisbastion.platform.v1.RiskClass risk_class = 4;
+  // Target set to approve.
+  repeated string targets = 5;
+  // Requesting identity.
+  string requester = 6;
+}
+
+// RequestApprovalResponse returns the pending approval.
+message RequestApprovalResponse {
+  // The created approval (state PENDING).
+  Approval approval = 1;
+}
+
+// RecordApprovalDecisionRequest adds one approver vote (SoD enforced).
+message RecordApprovalDecisionRequest {
+  // Approval ULID.
+  string approval_id = 1;
+  // The vote.
+  ApproverDecision decision = 2;
+}
+
+// RecordApprovalDecisionResponse returns the updated approval.
+message RecordApprovalDecisionResponse {
+  // The updated approval.
+  Approval approval = 1;
+}
+
+// GetApprovalRequest fetches an approval.
+message GetApprovalRequest {
+  // Approval ULID.
+  string approval_id = 1;
+}
+
+// GetApprovalResponse returns the approval.
+message GetApprovalResponse {
+  // The approval.
+  Approval approval = 1;
+}
+
+// ListApprovalsRequest filters approvals (operator queue).
+message ListApprovalsRequest {
+  // Optional state filter (e.g. PENDING for the operator queue).
+  ApprovalState state = 1;
+  // Optional RoE filter.
+  string roe_id = 2;
+  // Pagination cursor.
+  string page_token = 3;
+  // Page size.
+  uint32 page_size = 4;
+}
+
+// ListApprovalsResponse returns matching approvals.
+message ListApprovalsResponse {
+  // Matching approvals.
+  repeated Approval approvals = 1;
+  // Next-page cursor (empty when exhausted).
+  string next_page_token = 2;
+}
+
+// ApprovalService (doc 11 §2.1.8). Publishes authz.approvals.v1 on state changes.
+service ApprovalService {
+  // Open a four-eyes approval request.
+  rpc RequestApproval(RequestApprovalRequest) returns (RequestApprovalResponse);
+  // Record one approver's vote (enforces SoD and distinctness).
+  rpc RecordApprovalDecision(RecordApprovalDecisionRequest) returns (RecordApprovalDecisionResponse);
+  // Fetch an approval.
+  rpc GetApproval(GetApprovalRequest) returns (GetApprovalResponse);
+  // List approvals (operator queue).
+  rpc ListApprovals(ListApprovalsRequest) returns (ListApprovalsResponse);
+}

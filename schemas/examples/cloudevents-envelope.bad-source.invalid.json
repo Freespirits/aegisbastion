@@ -1,0 +1,26 @@
+{
+  "specversion": "1.0",
+  "id": "evt_01J9ZC9V3Q",
+  "source": "//evil.example/detect",
+  "type": "com.aegisbastion.alert.v1",
+  "time": "2026-07-30T07:00:00Z",
+  "datacontenttype": "application/json",
+  "data": {
+    "schema_version": "1.0",
+    "event_id": "evt_01J9ZC9V3Q",
+    "org_id": "org_acme",
+    "source_module": "detect",
+    "source_event_id": "fnd_01J9A7K2",
+    "authorization_token_id": "tok_01J9ZM8W3F",
+    "title": "Spoofed source — must fail",
+    "severity": "high",
+    "confidence": "probable",
+    "category": "operational",
+    "asset": {
+      "asset_id": "asset_88f3",
+      "kind": "subdomain",
+      "identifier": "api.acme.com"
+    },
+    "occurred_at": "2026-07-30T06:59:41Z"
+  }
+}

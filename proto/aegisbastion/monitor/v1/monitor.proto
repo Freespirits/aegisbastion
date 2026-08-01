@@ -1,0 +1,354 @@
+syntax = "proto3";
+
+package aegisbastion.monitor.v1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+// Monitor module contracts (doc 03 §4 orders, §5 event contracts). Monitor
+// registers agent_type "monitor" with capabilities:
+//   monitor.watch        R1  standing watch, rolling 24 h (scope-bound token)
+//   monitor.rescan       R1  bounded commander-ordered verification
+//   monitor.baseline.set R0  capture declared-good baseline
+//   monitor.feed.sync    R0  attach/detach passive feeds
+// (Ruling A: watch/rescan are R1 active re-probing; R0-only missions run
+// passive-only mode — feed ingestion + cached diffing, zero target contact.)
+option go_package = "github.com/aegisbastion/aegisbastion/gen/go/aegisbastion/monitor/v1;monitorv1";
+
+// Severity (doc 03 §7.5): info|low|medium|high|critical.
+enum Severity {
+  // Zero value; unset.
+  SEVERITY_UNSPECIFIED = 0;
+  // Informational.
+  SEVERITY_INFO = 1;
+  // Low.
+  SEVERITY_LOW = 2;
+  // Medium.
+  SEVERITY_MEDIUM = 3;
+  // High.
+  SEVERITY_HIGH = 4;
+  // Critical.
+  SEVERITY_CRITICAL = 5;
+}
+
+// Confidence (doc 03 §5.1): confirmed = multi-probe quorum.
+enum Confidence {
+  // Zero value; unset.
+  CONFIDENCE_UNSPECIFIED = 0;
+  // Multi-probe quorum.
+  CONFIDENCE_CONFIRMED = 1;
+  // Probable.
+  CONFIDENCE_PROBABLE = 2;
+  // Possible.
+  CONFIDENCE_POSSIBLE = 3;
+}
+
+// ProbeType (doc 03 §6.1; tcp_port is Later, not MVP-A).
+enum ProbeType {
+  // Zero value; unset.
+  PROBE_TYPE_UNSPECIFIED = 0;
+  // DNS lookups against authoritative resolvers.
+  PROBE_TYPE_DNS = 1;
+  // TLS handshakes.
+  PROBE_TYPE_TLS = 2;
+  // HTTP GETs.
+  PROBE_TYPE_HTTP = 3;
+  // TCP connects to previously-open ports (Later — not MVP-A).
+  PROBE_TYPE_TCP_PORT = 4;
+}
+
+// AssetKind (doc 03 §5.1; cloud-resource drift is Later).
+enum AssetKind {
+  // Zero value; unset.
+  ASSET_KIND_UNSPECIFIED = 0;
+  // Apex domain.
+  ASSET_KIND_DOMAIN = 1;
+  // Subdomain.
+  ASSET_KIND_SUBDOMAIN = 2;
+  // IP address.
+  ASSET_KIND_IP = 3;
+  // Cloud resource (Later).
+  ASSET_KIND_CLOUD_RESOURCE = 4;
+}
+
+// ChangeType — the change_type enum v1 (doc 03 §5.2).
+enum ChangeType {
+  // Zero value; unset.
+  CHANGE_TYPE_UNSPECIFIED = 0;
+  // New asset observed (asset lifecycle).
+  CHANGE_TYPE_ASSET_NEW = 1;
+  // Asset disappeared (asset lifecycle).
+  CHANGE_TYPE_ASSET_REMOVED = 2;
+  // Asset reappeared (asset lifecycle).
+  CHANGE_TYPE_ASSET_REACTIVATED = 3;
+  // DNS record set changed (DNS).
+  CHANGE_TYPE_DNS_RECORDS_CHANGED = 4;
+  // CNAME target no longer resolves (DNS).
+  CHANGE_TYPE_DNS_DANGLING_CNAME = 5;
+  // New DNS records appeared (DNS).
+  CHANGE_TYPE_DNS_NEW_RECORDS = 6;
+  // Nameserver set changed (DNS).
+  CHANGE_TYPE_DNS_NS_CHANGED = 7;
+  // Certificate replaced (TLS).
+  CHANGE_TYPE_TLS_CERT_CHANGED = 8;
+  // Certificate expires ≤ 14 d (TLS).
+  CHANGE_TYPE_TLS_CERT_EXPIRING = 9;
+  // Certificate expired (TLS).
+  CHANGE_TYPE_TLS_CERT_EXPIRED = 10;
+  // Negotiated protocol weakened (TLS).
+  CHANGE_TYPE_TLS_PROTOCOL_DOWNGRADE = 11;
+  // Certificate does not match the host (TLS).
+  CHANGE_TYPE_TLS_HOSTNAME_MISMATCH = 12;
+  // HTTP status changed (HTTP).
+  CHANGE_TYPE_HTTP_STATUS_CHANGED = 13;
+  // HTTP title changed (HTTP).
+  CHANGE_TYPE_HTTP_TITLE_CHANGED = 14;
+  // HTTP content changed (HTTP).
+  CHANGE_TYPE_HTTP_CONTENT_CHANGED = 15;
+  // HTTP headers changed (HTTP).
+  CHANGE_TYPE_HTTP_HEADERS_CHANGED = 16;
+  // New technology detected (HTTP).
+  CHANGE_TYPE_HTTP_TECH_ADDED = 17;
+  // Technology disappeared (HTTP).
+  CHANGE_TYPE_HTTP_TECH_REMOVED = 18;
+  // Redirect destination changed (HTTP).
+  CHANGE_TYPE_HTTP_REDIRECT_TARGET_CHANGED = 19;
+  // Port opened vs. inventory expectation (Port).
+  CHANGE_TYPE_PORT_OPENED = 20;
+  // Port closed vs. inventory expectation (Port).
+  CHANGE_TYPE_PORT_CLOSED = 21;
+  // Cloud config drift (Later).
+  CHANGE_TYPE_CLOUD_CONFIG_DRIFT = 22;
+  // New cloud resource (Later).
+  CHANGE_TYPE_CLOUD_RESOURCE_NEW = 23;
+  // Cloud resource removed (Later).
+  CHANGE_TYPE_CLOUD_RESOURCE_REMOVED = 24;
+  // Deviation from the approved baseline (Drift).
+  CHANGE_TYPE_BASELINE_DRIFT = 25;
+  // Baseline deviation resolved (Drift).
+  CHANGE_TYPE_BASELINE_DRIFT_RESOLVED = 26;
+  // Exposure rule fired; rule id in diff.rule_id (Exposure).
+  CHANGE_TYPE_EXPOSURE_OPENED = 27;
+  // Exposure rule stopped firing (Exposure).
+  CHANGE_TYPE_EXPOSURE_CLOSED = 28;
+  // Asset unprobeable > 24 h (Meta).
+  CHANGE_TYPE_MONITOR_PROBE_FAILING = 29;
+  // Emission cap hit; aggregated burst marker (Meta).
+  CHANGE_TYPE_MONITOR_CHANGE_BURST = 30;
+}
+
+// MonitoredAsset identifies the asset a change concerns (doc 03 §5.1).
+message MonitoredAsset {
+  // Asset id from the data platform, e.g. "asset_88f3…".
+  string asset_id = 1;
+  // Asset kind.
+  AssetKind kind = 2;
+  // Identifier, e.g. "api.acme.com".
+  string identifier = 3;
+  // Criticality label, e.g. "high".
+  string criticality = 4;
+}
+
+// Detector identifies the probe that confirmed a change (doc 03 §5.1).
+message Detector {
+  // Probe type.
+  ProbeType probe_type = 1;
+  // Worker id, e.g. "mon-w-7d4f".
+  string worker_id = 2;
+  // Watch that produced the event.
+  string watch_id = 3;
+}
+
+// SuggestedFollowup is an advisory hint for commander replanning (doc 03 §5.1).
+message SuggestedFollowup {
+  // Suggested capability, e.g. "detect.scan".
+  string capability = 1;
+  // Why, e.g. "cert renewed 3x in 30d — possible automation breakage".
+  string reason = 2;
+}
+
+// MonitorChange v1 — published on monitor.changes as a protobuf payload inside
+// the doc 01 §8.2 Envelope (doc 03 §5.1). Carries P2_CHANGE priority_hint
+// semantics: the Orchestrator dedups on fingerprint (24 h window) and routes to
+// commanders on mission.events.
+message MonitorChange {
+  // Contract version — "1.0".
+  string schema_version = 1;
+  // ULID, e.g. "chg_01J9D…".
+  string event_id = 2;
+  // Owning mission.
+  string mission_id = 3;
+  // RoE authorizing the watch.
+  string roe_id = 4;
+  // Owning org.
+  string org_id = 5;
+  // Asset the change concerns.
+  MonitoredAsset asset = 6;
+  // What changed.
+  ChangeType change_type = 7;
+  // Severity (§7.5 model).
+  Severity severity = 8;
+  // Detection confidence.
+  Confidence confidence = 9;
+  // Human summary, e.g. "TLS certificate for api.acme.com expires in 6 days".
+  string summary = 10;
+  // Typed diff payload (doc 03 §7: kind, before, after, rule_id for exposures).
+  // Full diffs stay in snapshots; this carries the compact form.
+  google.protobuf.Struct diff = 11;
+  // Before/after snapshot ids ("snp_…").
+  SnapshotRefs snapshot_refs = 12;
+  // sha256(mission|asset|change_type|diff_key) — 24 h dedup key, also used as
+  // fingerprint_hint in the monitor.alert mapping (doc 03 §5.3).
+  string fingerprint = 13;
+  // First time this fingerprint was seen (UTC).
+  google.protobuf.Timestamp first_seen_at = 14;
+  // Detection time of the confirming probe (UTC).
+  google.protobuf.Timestamp occurred_at = 15;
+  // Confirming probe.
+  Detector detector = 16;
+  // Advisory follow-ups for commander replanning.
+  repeated SuggestedFollowup suggested_followups = 17;
+  // Free-form labels, e.g. {"surface": "external", "source": "active_probe"}.
+  // labels.source=passive_feed marks passive-derived alerts (doc 03 §5.3).
+  map<string, string> labels = 18;
+}
+
+// SnapshotRefs pair the before/after snapshots behind a change.
+message SnapshotRefs {
+  // Prior snapshot id.
+  string before = 1;
+  // New snapshot id.
+  string after = 2;
+}
+
+// ScopeMatch classifies a new-asset candidate against RoE scope (doc 03 §9.4).
+enum ScopeMatch {
+  // Zero value; unset.
+  SCOPE_MATCH_UNSPECIFIED = 0;
+  // Inside RoE scope — added to the watch set immediately.
+  SCOPE_MATCH_IN_SCOPE = 1;
+  // Explicitly excluded — never probed.
+  SCOPE_MATCH_EXCLUDED = 2;
+  // Outside scope — not watched.
+  SCOPE_MATCH_OUT_OF_SCOPE = 3;
+}
+
+// NewAssetCandidate v1 — published on monitor.assets.new (doc 03 §5.4).
+// Discover/Data Platform consume it to expand inventory.
+message NewAssetCandidate {
+  // Contract version — "1.0".
+  string schema_version = 1;
+  // ULID, e.g. "nac_01J9F…".
+  string event_id = 2;
+  // Owning mission.
+  string mission_id = 3;
+  // RoE authorizing the watch.
+  string roe_id = 4;
+  // The candidate asset (kind + identifier).
+  CandidateAsset candidate = 5;
+  // Where the candidate came from, e.g. {"type": "ct_log", "detail":
+  // "log:cloudflare-nimbus2027, cert cn=…, first_seen …"}.
+  google.protobuf.Struct source = 6;
+  // Scope classification (doc 03 §9.4 out-of-scope discipline).
+  ScopeMatch scope_match = 7;
+  // Detection confidence.
+  Confidence confidence = 8;
+}
+
+// CandidateAsset is an unvetted asset identifier.
+message CandidateAsset {
+  // Asset kind.
+  AssetKind kind = 1;
+  // Identifier, e.g. "grafana-staging.acme.com".
+  string identifier = 2;
+}
+
+// AssetSelector picks the watch set (doc 03 §4.2). Commanders never push assets
+// directly into a watch — they change the selector or the RoE scope; Monitor
+// converges the watch set.
+message AssetSelector {
+  // Mission whose assets are watched.
+  string mission_id = 1;
+  // Asset kinds to include.
+  repeated AssetKind kinds = 2;
+}
+
+// WatchParams — monitor.watch v1 params (doc 03 §4.2), carried in
+// TaskAssignment.params. Standing watch, rolling 24 h, authorized by a
+// scope-bound watch token (Ruling A).
+message WatchParams {
+  // Stable across renewals, e.g. "wch_01J9A…".
+  string watch_id = 1;
+  // Watch set selector.
+  AssetSelector asset_selector = 2;
+  // Cadence profile: "fast" | "standard" | "daily" (doc 03 §6.4).
+  string cadence_profile = 3;
+  // Probe subset the RoE/operator enabled.
+  repeated ProbeType probe_types = 4;
+  // Optional baseline enabling drift detection.
+  string baseline_id = 5;
+  // Minimum severity mapped to monitor.alert: "info"|"low"|"medium"|"high"|"critical".
+  string alert_threshold = 6;
+  // Change-event emission cap per hour (burst protection).
+  uint32 emission_cap_per_hour = 7;
+}
+
+// RescanParams — monitor.rescan v1 params (doc 03 §4.2): bounded,
+// commander-ordered verification (e.g. re-check api.acme.com after a change
+// event, or fresh state before planning).
+message RescanParams {
+  // Concrete targets to re-probe (within the scope-bound token's embedded scope).
+  repeated string targets = 1;
+  // Probes to run.
+  repeated ProbeType probe_types = 2;
+  // Why, e.g. "verify change chg_01J9C…".
+  string reason = 3;
+  // Emit change events for diffs found.
+  bool report_events = 4;
+}
+
+// BaselineSetParams — monitor.baseline.set v1 params (R0, doc 03 §4.2): capture
+// current state as the declared-good, operator-approved drift reference.
+message BaselineSetParams {
+  // Baseline id, e.g. "bl_01J9B…".
+  string baseline_id = 1;
+  // Assets the baseline covers.
+  AssetSelector asset_selector = 2;
+  // Source — "current_snapshots".
+  string from = 3;
+}
+
+// FeedSyncParams — monitor.feed.sync v1 params (R0, doc 03 §4.2): attach/detach
+// passive feeds for scope domains.
+message FeedSyncParams {
+  // Feeds to sync, e.g. ["ct_logs"].
+  repeated string feeds = 1;
+  // Scope domains to attach feeds for.
+  repeated string domains = 2;
+}
+
+// WatchCheckpointSummary — the checkpoint TaskResult summary for a watch at
+// deadline or every 24 h (doc 03 §4.3). The checkpoint's targets_touched uses
+// the "scope:sha256:…" form, accepted ONLY alongside the per-probe
+// TARGET_TOUCHED audit records, which remain the authoritative cross-check
+// (Ruling A.4).
+message WatchCheckpointSummary {
+  // Watch being checkpointed.
+  string watch_id = 1;
+  // Assets under watch.
+  uint64 assets_watched = 2;
+  // Probes run in the window.
+  uint64 probes_executed = 3;
+  // Failed probes.
+  uint64 probe_failures = 4;
+  // Change events published.
+  uint64 change_events_emitted = 5;
+  // Change events deduped/suppressed.
+  uint64 change_events_suppressed = 6;
+  // Exposure rules currently firing.
+  uint64 exposures_open = 7;
+  // Exposure rules closed in the window.
+  uint64 exposures_closed = 8;
+  // True when the watch should be renewed (standing-watch continuation).
+  bool renewal_requested = 9;
+}

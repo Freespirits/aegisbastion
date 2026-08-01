@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aegisbastion.local/schemas/evidence/v1/schema.json",
+  "title": "Phish-Catcher Evidence v1",
+  "description": "Pipeline input (doc 07 §4.1). NEVER leaves the client (§7).",
+  "type": "object",
+  "required": ["schemaVersion", "kind", "clientMeta"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "kind": { "enum": ["email", "page", "url"] },
+    "message": {
+      "type": "object",
+      "required": ["headers"],
+      "properties": {
+        "headers": {
+          "type": "object",
+          "properties": {
+            "from": { "type": "string" },
+            "replyTo": { "type": "string" },
+            "returnPath": { "type": "string" },
+            "authenticationResults": { "type": "string" },
+            "receivedSpf": { "type": "string" },
+            "messageId": { "type": "string" }
+          },
+          "additionalProperties": { "type": "string" }
+        },
+        "subject": { "type": "string" },
+        "bodyText": { "type": "string" },
+        "bodyHtml": { "type": "string" },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["filename", "contentType", "size"],
+            "properties": {
+              "filename": { "type": "string" },
+              "contentType": { "type": "string" },
+              "size": { "type": "integer", "minimum": 0 },
+              "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+              "macroDetected": { "type": "boolean" }
+            }
+          }
+        },
+        "urls": { "type": "array", "items": { "type": "string" } },
+        "anchors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["href", "displayText"],
+            "properties": {
+              "href": { "type": "string" },
+              "displayText": { "type": "string" }
+            }
+          }
+        },
+        "images": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["src"],
+            "properties": {
+              "src": { "type": "string" },
+              "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+            }
+          }
+        }
+      }
+    },
+    "page": {
+      "type": "object",
+      "required": ["origin", "url", "title"],
+      "properties": {
+        "origin": { "type": "string" },
+        "url": { "type": "string" },
+        "title": { "type": "string" },
+        "forms": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["action", "method", "hasPasswordField", "actionOrigin"],
+            "properties": {
+              "action": { "type": "string" },
+              "method": { "type": "string" },
+              "hasPasswordField": { "type": "boolean" },
+              "actionOrigin": { "type": "string" }
+            }
+          }
+        },
+        "links": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["href", "displayText"],
+            "properties": {
+              "href": { "type": "string" },
+              "displayText": { "type": "string" },
+              "target": { "type": "string" },
+              "rel": { "type": "string" }
+            }
+          }
+        },
+        "iframes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["src", "hidden"],
+            "properties": {
+              "src": { "type": "string" },
+              "hidden": { "type": "boolean" }
+            }
+          }
+        },
+        "faviconPHash": { "type": "string" },
+        "hasFullscreenOverlay": { "type": "boolean" }
+      }
+    },
+    "url": {
+      "type": "object",
+      "required": ["raw", "host", "registeredDomain", "punyDecoded", "scheme"],
+      "properties": {
+        "raw": { "type": "string" },
+        "host": { "type": "string" },
+        "registeredDomain": { "type": "string" },
+        "punyDecoded": { "type": "string" },
+        "scheme": { "type": "string" }
+      }
+    },
+    "clientMeta": {
+      "type": "object",
+      "required": ["libVersion", "bundleVersion", "policyVersion"],
+      "properties": {
+        "libVersion": { "type": "string" },
+        "bundleVersion": { "type": "string" },
+        "policyVersion": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

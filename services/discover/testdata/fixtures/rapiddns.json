@@ -1,0 +1,9 @@
+<!DOCTYPE html>
+<html><body>
+<table>
+  <tr><th>Hostname</th><th>Type</th><th>Value</th><th>TTL</th></tr>
+  <tr><td>www.example.com</td><td>A</td><td>203.0.113.10</td><td>300</td></tr>
+  <tr><td>blog.example.com</td><td>CNAME</td><td>example.com</td><td>300</td></tr>
+  <tr><td>shop.example.com</td><td>A</td><td>198.51.100.20</td><td>300</td></tr>
+</table>
+</body></html>

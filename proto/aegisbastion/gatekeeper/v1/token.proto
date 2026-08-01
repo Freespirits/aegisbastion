@@ -1,0 +1,241 @@
+syntax = "proto3";
+
+package aegisbastion.gatekeeper.v1;
+
+import "aegisbastion/platform/v1/types.proto";
+
+// Scope Token minting, exchange, refresh, revocation, and JWKS (doc 11 §3.2,
+// doc 01 §5.5, Rulings A + C5). The gatekeeper Scope Token is the ONLY execution
+// credential in the platform (Ruling C5): Ed25519-signed JWT (EdDSA), JWKS-
+// verified, task-bound, audience "aegisbastion.modules", 15-minute TTL for all
+// active classes R1–R3.
+option go_package = "github.com/aegisbastion/aegisbastion/gen/go/aegisbastion/gatekeeper/v1;gatekeeperv1";
+
+// ScopeTokenClaims — Authorization Token v1.1 claim set (doc 01 §5.5 as amended
+// by Ruling A, converged with doc 11 §3.2). Field names are the exact JWT claim
+// names. The token is a compact EdDSA JWT:
+//   header:  {"alg": "EdDSA", "typ": "JWT", "kid": "gk-2026-07-a"}
+//   payload: this claim set.
+//
+// Binding rules (doc 11 §3.2):
+//   - TTL ≤ 15 min for ALL active classes R1–R3 (Ruling C5 — uniform; doc 01's
+//     15-min bound wins over the earlier 30–60 min R1 default). No unauthenticated
+//     refresh tokens: long-running work re-authorizes mid-run via the SDK/PEP
+//     (RefreshToken below performs a full policy re-check), so revocation bites
+//     in ≤ 15 min even without the ≤ 5 s revocation channel.
+//   - Task-bound: a token minted for one task_id is useless for any other task
+//     (jti reuse across tasks triggers anomaly + auto-revocation, doc 11 §7).
+//   - Concrete targets live in a hashed manifest rather than inline (avoids giant
+//     tokens and target leaks in logs); the PEP verifies each intended target is
+//     in the manifest before firing.
+//   - Verification is fully local: cached JWKS, exp/nbf with 60 s leeway; PEPs
+//     reject skew > 120 s and alert.
+//   - mTLS workload identity is required IN ADDITION to the token (token alone
+//     is insufficient).
+message ScopeTokenClaims {
+  // Issuer — always "gatekeeper.platform".
+  string iss = 1;
+  // Audience — always "aegisbastion.modules".
+  string aud = 2;
+  // Token id, e.g. "tok_01J9ZM8W3F". This jti is the authorization_token_id
+  // carried by AlertEvent v1 producers (doc 05 §5.2).
+  string jti = 3;
+  // Subject — the executing agent/workload, e.g. "agent_01J92F…" or
+  // "svc-stress-engine".
+  string sub = 4;
+  // Task this token is bound to (single-purpose; useless for any other task).
+  string task_id = 5;
+  // RoE authorizing the work.
+  string roe_id = 6;
+  // RoE version the token binds to; PEPs re-validate and halt on version/expiry
+  // change (doc 11 §7).
+  uint64 roe_version = 7;
+  // Authorized risk class. Tokens are only minted for active classes R1–R3 —
+  // R0 requires no per-target token (doc 11 §1).
+  aegisbastion.platform.v1.RiskClass risk_class = 8;
+  // Capabilities this token permits, e.g. ["stress.http_flood"].
+  repeated string capabilities = 9;
+  // Hashed target manifest reference (doc 01 §5.5). For scope-bound watch tokens
+  // the manifest holds the canonical RoE scope document instead of an exact
+  // target list, and manifest_sha256 IS the "scope:sha256:<hash>" audit value
+  // (Ruling A.3).
+  TargetManifestRef targets = 10;
+  // Ruling A extension — the scope-bound watch-token form. Valid ONLY for the R1
+  // standing capabilities monitor.watch / monitor.rescan; R2/R3 tokens always
+  // use the exact-enumerated target manifest. When true, the SDK/PEP evaluates
+  // each probe target against the manifest's embedded canonical scope (domains,
+  // CIDRs, exclusions) using doc 01 §10.1's canonicalized matching
+  // (longest-prefix/exact-host); EXCLUSIONS ALWAYS WIN; fail-closed — a scan job
+  // without a valid in-scope token is dead-lettered and audit-logged.
+  bool scope_bound = 11;
+  // Self-contained rate caps enforced by the PEP per burst — the token is NOT a
+  // capability to bypass rate limits (doc 11 §3.2).
+  TokenRateCaps rate_caps = 12;
+  // Four-eyes approval reference ("appr_…") — mandatory for R3 and for R2
+  // stress.* on production targets (Ruling B.4).
+  string approval_id = 13;
+  // Issued-at (Unix seconds).
+  int64 iat = 14;
+  // Not-before (Unix seconds; 60 s leeway on verification).
+  int64 nbf = 15;
+  // Expiry (Unix seconds) — exp − iat ≤ 900 (15 min TTL, Ruling C5).
+  int64 exp = 16;
+}
+
+// TargetManifestRef points at the hashed manifest holding the concrete targets
+// (exact-enumerated form) or the canonical scope document (scope-bound form).
+message TargetManifestRef {
+  // Hash algorithm — always "sha256".
+  string hash_alg = 1;
+  // Manifest object URI, e.g. "blob://tokens/tok_01J9ZM8W3F/targets.json" or
+  // "…/scope.json" for watch tokens.
+  string manifest_uri = 2;
+  // SHA-256 (hex) of the manifest bytes. For scope-bound watch tokens this hash
+  // IS the audit value "scope:sha256:<hash>" (Ruling A.3 — the manifest
+  // mechanism carries the canonical scope; no third form exists).
+  string manifest_sha256 = 3;
+  // Number of concrete targets (exact-enumerated form; omitted for scope-bound).
+  uint32 count = 4;
+}
+
+// TokenRateCaps — rate caps embedded in the token (doc 01 §5.5 JSON form
+// {"max_rps": 50}; doc 11 §3.2 form {"rps": 5000, "max_concurrent": 2} —
+// max_rps ≡ rps, one claim set).
+message TokenRateCaps {
+  // Requests-per-second ceiling.
+  uint32 max_rps = 1;
+  // Concurrency ceiling (0 = unset).
+  uint32 max_concurrent = 2;
+}
+
+// MintTokenRequest asks token-service for a Scope Token. Hard precondition: a
+// policy-service DecisionEvent grant (allow) referencing the same task — modules
+// cannot call token-service without one (doc 11 §2.2 invariant).
+message MintTokenRequest {
+  // The decision id ("dec_…") of the ALLOW decision authorizing this mint.
+  string decision_id = 1;
+  // Task the token binds to (must match the decision).
+  string task_id = 2;
+  // Executing agent/workload (becomes sub).
+  string subject = 3;
+  // Concrete targets for the exact-enumerated manifest. Must equal the
+  // decision's authorized target set. Ignored when scope_bound is set.
+  repeated string targets = 4;
+  // Request the Ruling A scope-bound watch-token form. Only honored when the
+  // authorized capability is monitor.watch or monitor.rescan at R1 — anything
+  // else is rejected. The manifest then carries the canonical RoE scope.
+  bool scope_bound = 5;
+}
+
+// MintTokenResponse returns the minted token and its manifest location.
+message MintTokenResponse {
+  // Compact EdDSA JWT.
+  string token = 1;
+  // The claims as minted (for callers that need the manifest URI/jti without
+  // parsing the JWT).
+  ScopeTokenClaims claims = 2;
+}
+
+// ExchangeTokenRequest implements Ruling C9: a coordinator (e.g. Detect's) asks
+// for a NARROWED token for a worker job — only gatekeeper's token-service mints.
+// Fail-closed when token-service is unreachable (doc 04 §10.1).
+message ExchangeTokenRequest {
+  // The caller's current Scope Token (compact JWT) for the parent task.
+  string parent_token = 1;
+  // Narrowed target subset — MUST be a strict subset of the parent token's
+  // authorized targets (or in-scope under its embedded scope).
+  repeated string narrowed_targets = 2;
+  // Worker job id the new token binds to (becomes task_id).
+  string worker_task_id = 3;
+  // Worker workload identity (becomes sub).
+  string worker_subject = 4;
+}
+
+// ExchangeTokenResponse returns the narrowed token.
+message ExchangeTokenResponse {
+  // Compact EdDSA JWT for the worker job.
+  string token = 1;
+  // The claims as minted.
+  ScopeTokenClaims claims = 2;
+}
+
+// RefreshTokenRequest is mid-run re-authorization for long-running work (docs 01
+// §5.5, 03 §9.2, 11 §3.2): NOT an unauthenticated refresh — token-service
+// re-runs the policy check (RoE still active, not revoked, approval still valid)
+// before minting a successor token for the same task_id.
+message RefreshTokenRequest {
+  // The current (possibly near-expiry) Scope Token for the task.
+  string current_token = 1;
+}
+
+// RefreshTokenResponse returns a successor token or a denial.
+message RefreshTokenResponse {
+  // Successor compact EdDSA JWT (empty when re-authorization was denied — the
+  // agent must halt when its current token expires).
+  string token = 1;
+  // Successor claims.
+  ScopeTokenClaims claims = 2;
+}
+
+// RevokeTokenRequest revokes a token by jti (also pushed on
+// tasks.revocations.v1; PEP revocation caches converge ≤ 30 s, kill ≤ 5 s).
+message RevokeTokenRequest {
+  // Token id to revoke.
+  string jti = 1;
+  // Reason, recorded in the audit chain (event kind token.revoked).
+  string reason = 2;
+}
+
+// RevokeTokenResponse confirms revocation.
+message RevokeTokenResponse {
+  // True when the token is in the revocation set.
+  bool revoked = 1;
+}
+
+// GetJWKSRequest asks for the public verification keys.
+message GetJWKSRequest {
+  // Optional kid filter (empty = all active keys).
+  string kid = 1;
+}
+
+// GetJWKSResponse is the JWKS document (published at
+// /.well-known/gatekeeper-jwks.json, internal + mTLS, doc 11 §3.2). Rotation via
+// kid header, two active keys max, 30-day rotation, overlap during rotation
+// (doc 01 §10.2).
+message GetJWKSResponse {
+  // Active public keys.
+  repeated JsonWebKey keys = 1;
+}
+
+// JsonWebKey is one Ed25519 public key in JWK form (RFC 8037).
+message JsonWebKey {
+  // Key type — always "OKP".
+  string kty = 1;
+  // Curve — always "Ed25519".
+  string crv = 2;
+  // Key id, e.g. "gk-2026-07-a" (matches the JWT kid header).
+  string kid = 3;
+  // Algorithm — always "EdDSA".
+  string alg = 4;
+  // Use — always "sig".
+  string use = 5;
+  // base64url-encoded raw Ed25519 public key.
+  string x = 6;
+}
+
+// TokenService — mints/revokes Scope Tokens and publishes JWKS (doc 11 §2.1.2).
+// Holds the Ed25519 signing keys (MVP-A: sealed file key per doc 00 Q1; MVP-B:
+// Azure Key Vault). Enforces mint preconditions by calling policy-service.
+service TokenService {
+  // Mint a Scope Token against an existing ALLOW decision (exact-enumerated or
+  // scope-bound watch form).
+  rpc MintToken(MintTokenRequest) returns (MintTokenResponse);
+  // Exchange a parent token for a narrowed worker token (Ruling C9).
+  rpc ExchangeToken(ExchangeTokenRequest) returns (ExchangeTokenResponse);
+  // Mid-run re-authorization: re-checks policy, then mints a successor token.
+  rpc RefreshToken(RefreshTokenRequest) returns (RefreshTokenResponse);
+  // Revoke a token by jti.
+  rpc RevokeToken(RevokeTokenRequest) returns (RevokeTokenResponse);
+  // Fetch the JWKS verification keys.
+  rpc GetJWKS(GetJWKSRequest) returns (GetJWKSResponse);
+}

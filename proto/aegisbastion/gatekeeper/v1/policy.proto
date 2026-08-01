@@ -1,0 +1,206 @@
+syntax = "proto3";
+
+package aegisbastion.gatekeeper.v1;
+
+import "google/protobuf/timestamp.proto";
+import "aegisbastion/platform/v1/types.proto";
+
+// policy-service — the platform's single Policy Decision Point (Ruling B). It
+// alone emits DecisionEvents on authz.decisions.v1 / authz.denials.v1; every
+// other component is a PEP that enforces its decisions or re-verifies its tokens.
+option go_package = "github.com/aegisbastion/aegisbastion/gen/go/aegisbastion/gatekeeper/v1;gatekeeperv1";
+
+// Decision is the PDP outcome.
+enum Decision {
+  // Zero value; unset.
+  DECISION_UNSPECIFIED = 0;
+  // Permitted; a Scope Token may be minted against this decision.
+  DECISION_ALLOW = 1;
+  // Denied. Deny-by-default: anything not explicitly granted is denied.
+  DECISION_DENY = 2;
+}
+
+// DenyReason — the stable v1 denial reason-code enum (doc 11 §3.3). Published
+// verbatim on authz.denials.v1 so commanders can replan (drop out-of-scope
+// hosts) instead of retrying blindly; RATE_LIMITED denials include
+// retry_after_ms.
+enum DenyReason {
+  // Zero value; unset.
+  DENY_REASON_UNSPECIFIED = 0;
+  // Caller identity invalid/absent (pipeline step 1 AUTH).
+  DENY_REASON_UNAUTHENTICATED = 1;
+  // Caller lacks the required role (step 1).
+  DENY_REASON_FORBIDDEN_ROLE = 2;
+  // Global revocation active (step 2 REVOCATION).
+  DENY_REASON_REVOKED_GLOBAL = 3;
+  // RoE revoked (step 2).
+  DENY_REASON_REVOKED_ROE = 4;
+  // Target revoked (step 2).
+  DENY_REASON_REVOKED_TARGET = 5;
+  // Capability revoked (step 2).
+  DENY_REASON_REVOKED_CAPABILITY = 6;
+  // RoE missing/suspended/not in window/version mismatch (step 3 ROE_ACTIVE).
+  DENY_REASON_ROE_NOT_ACTIVE = 7;
+  // RoE validity window closed (step 3).
+  DENY_REASON_ROE_EXPIRED = 8;
+  // Target outside the resolved effective target list (step 4 TARGET_SCOPE).
+  DENY_REASON_TARGET_NOT_IN_SCOPE = 9;
+  // Target hit an explicit exclusion — exclusions always win (step 4).
+  DENY_REASON_TARGET_EXCLUDED = 10;
+  // R2/R3 target not in verified asset inventory (step 4, module 09 API).
+  DENY_REASON_TARGET_UNVERIFIED = 11;
+  // Capability ∉ allowed_capabilities (step 5 CAPABILITY).
+  DENY_REASON_CAPABILITY_NOT_ALLOWED = 12;
+  // Requested risk class > max_risk_class (step 5; renamed from TIER_EXCEEDED,
+  // Ruling B.4).
+  DENY_REASON_RISK_CLASS_EXCEEDED = 13;
+  // R2/R3 without a present+verified legal artifact (step 6 LEGAL).
+  DENY_REASON_LEGAL_ARTIFACT_MISSING = 14;
+  // Missing four-eyes approval where required (step 7 APPROVAL).
+  DENY_REASON_APPROVAL_MISSING = 15;
+  // Approval exists but mismatched (wrong targets, expired 72 h, SoD violation).
+  DENY_REASON_APPROVAL_MISMATCH = 16;
+  // Inside a blackout window (step 8 WINDOW).
+  DENY_REASON_BLACKOUT_WINDOW = 17;
+  // Source region ∉ jurisdictions_allowed (step 9).
+  DENY_REASON_JURISDICTION_DENIED = 18;
+  // data_classes_touched ⊄ data_classes (step 9).
+  DENY_REASON_DATA_CLASS_DENIED = 19;
+  // Projected use exceeds rate caps (step 10 RATE); retry_after_ms is set.
+  DENY_REASON_RATE_LIMITED = 20;
+  // Decision could not be durably recorded — fail-closed (step 11 AUDIT_WRITE).
+  DENY_REASON_AUDIT_UNAVAILABLE = 21;
+  // Custom OPA/Rego policy denied (step 12 POLICY — tighten-only).
+  DENY_REASON_POLICY_DENIED = 22;
+}
+
+// Principal is the caller identity (step 1 AUTH: mTLS/SPIFFE verified).
+message Principal {
+  // "service" | "user".
+  string kind = 1;
+  // Identity id, e.g. "svc-cai-commander".
+  string id = 2;
+  // SPIFFE workload id, e.g. "spiffe://platform/cai".
+  string spiffe_id = 3;
+}
+
+// TaskContext identifies the task being authorized (commanders may only submit
+// for their own tasks — step 1).
+message TaskContext {
+  // Task ULID.
+  string task_id = 1;
+  // Originating plan (propagated into every decision/audit event so a full
+  // commander plan is reconstructible: who planned → who authorized → who
+  // approved → what executed → what happened, doc 11 §4).
+  string parent_plan_id = 2;
+  // Commander that proposed the task ("cai" | "hexstrike"; empty for operator
+  // tasks).
+  string commander = 3;
+}
+
+// AuthorizationRequest (doc 11 §3.3).
+message AuthorizationRequest {
+  // Request ULID, e.g. "req_01J9Z…".
+  string request_id = 1;
+  // Caller identity.
+  Principal principal = 2;
+  // Task being authorized.
+  TaskContext task = 3;
+  // Capability to exercise, e.g. "stress.http_flood".
+  string capability = 4;
+  // Concrete targets to check against the resolved scope.
+  repeated string targets = 5;
+  // RoE to authorize under.
+  string roe_id = 6;
+  // Expected RoE version (step 3 rejects mismatches).
+  uint64 roe_version = 7;
+  // Request time (UTC).
+  google.protobuf.Timestamp requested_at = 8;
+  // Evaluation context: source region and data classes touched (steps 9).
+  EvaluationContext context = 9;
+  // When true, evaluate WITHOUT recording side effects: no decision persistence,
+  // no token mint eligibility, no rate-cap reservation (PEP-3 edge preflight /
+  // scope dry-run per Ruling B.2; doc 01 Later §6 plan simulation). Denials are
+  // still returned.
+  bool dry_run = 10;
+}
+
+// EvaluationContext — step-9 inputs.
+message EvaluationContext {
+  // Source region, e.g. "westeurope".
+  string source_region = 1;
+  // Data classes the work will touch, e.g. "PII".
+  repeated string data_classes_touched = 2;
+}
+
+// Reason is one machine-readable decision reason (doc 11 §3.3).
+message Reason {
+  // Stable reason code.
+  DenyReason code = 1;
+  // Human-readable detail, e.g. "203.0.113.99 outside resolved target list v7".
+  string detail = 2;
+}
+
+// DecisionEvent (doc 11 §3.3) — published on authz.decisions.v1 (all) and
+// authz.denials.v1 (denials only, for fast commander replanning and operator
+// visibility).
+message DecisionEvent {
+  // Decision ULID, e.g. "dec_01J9Z…" — referenced by MintToken as the mint
+  // precondition (doc 11 §2.2 invariant: no token without a DecisionEvent grant).
+  string decision_id = 1;
+  // The request this decides.
+  string request_id = 2;
+  // Outcome.
+  Decision decision = 3;
+  // Risk class evaluated.
+  aegisbastion.platform.v1.RiskClass risk_class = 4;
+  // Reasons (empty on allow; ≥1 on deny).
+  repeated Reason reasons = 5;
+  // RoE evaluated.
+  string roe_id = 6;
+  // RoE version evaluated.
+  uint64 roe_version = 7;
+  // PDP evaluation latency in milliseconds.
+  uint32 eval_latency_ms = 8;
+  // Decision time (UTC).
+  google.protobuf.Timestamp decided_at = 9;
+  // Set on RATE_LIMITED denials: earliest safe retry (doc 11 §4).
+  uint32 retry_after_ms = 10;
+}
+
+// AuthorizeRequest wraps one AuthorizationRequest for the gRPC surface.
+message AuthorizeRequest {
+  // The authorization request.
+  AuthorizationRequest request = 1;
+}
+
+// AuthorizeResponse returns the decision.
+message AuthorizeResponse {
+  // The decision (also published on the bus for non-dry-run evaluations).
+  DecisionEvent decision = 1;
+}
+
+// PolicyService — the single PDP (doc 11 §2.1.3). The evaluation pipeline is
+// HARD-CODED in this order and cannot be reordered or bypassed by policy edits
+// (doc 11 §3.3):
+//   1. AUTH          caller mTLS/SPIFFE valid; commander only for its own tasks
+//   2. REVOCATION    global/RoE/target/capability revocation (≤ 30 s staleness)
+//   3. ROE_ACTIVE    exists, active, in window, version matches
+//   4. TARGET_SCOPE  every target ∈ resolved list, ∉ excludes (exclusions win);
+//                    R2/R3 also ∈ verified asset inventory (module 09, cached 5 m)
+//   5. CAPABILITY    ∈ allowed_capabilities; risk class ≤ max_risk_class
+//   6. LEGAL         R2/R3 legal artifact present+verified; Azure stress id
+//   7. APPROVAL      R3 + R2 stress.* production: four-eyes, SoD, 72 h, ⊆ targets
+//   8. WINDOW        not inside a blackout window (RoE-declared tz)
+//   9. JURISDICTION/DATA  region allowed; data classes ⊆
+//   10. RATE         projected use under caps
+//   11. AUDIT_WRITE  decision durably recorded (R1–R3 mandatory, fail-closed)
+//   12. POLICY       OPA/Rego extras — can only TIGHTEN, never loosen 1–11
+// Failure posture (doc 11 §7): every dependency failure fails closed for R1–R3;
+// R1+ decisions become AUDIT_UNAVAILABLE denials when audit ingest is down.
+service PolicyService {
+  // Evaluate one AuthorizationRequest against the pipeline. Called fail-closed
+  // by the Orchestrator dispatch PEP before enqueueing any R1+ task (Ruling
+  // B.2 PEP-1), and with dry_run=true for edge preflights (PEP-3).
+  rpc Authorize(AuthorizeRequest) returns (AuthorizeResponse);
+}

@@ -1,0 +1,98 @@
+syntax = "proto3";
+
+package aegisbastion.gatekeeper.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// revocation-service — the platform kill switch (doc 11 §2.1.7, §7; Ruling C11:
+// gatekeeper owns revocation semantics and emits tasks.revocations.v1; the
+// Orchestrator maps these to control.kill; module-internal kill tiers subscribe
+// to the same channel).
+option go_package = "github.com/aegisbastion/aegisbastion/gen/go/aegisbastion/gatekeeper/v1;gatekeeperv1";
+
+// RevocationScope is the blast radius of a revocation (doc 11 §1 item 7).
+enum RevocationScope {
+  // Zero value; unset.
+  REVOCATION_SCOPE_UNSPECIFIED = 0;
+  // Platform-wide halt (DISARM-ALL, doc 12 runbook).
+  REVOCATION_SCOPE_GLOBAL = 1;
+  // All work under one RoE.
+  REVOCATION_SCOPE_ROE = 2;
+  // One target.
+  REVOCATION_SCOPE_TARGET = 3;
+  // One capability.
+  REVOCATION_SCOPE_CAPABILITY = 4;
+}
+
+// Revocation — one revocation command. PEPs must ACK and halt in-flight work
+// ≤ 5 s (graceful: stop new requests, drain ≤ 5 s, report execution.halted);
+// modules missing 3 heartbeats during a revocation are quarantined (doc 11 §7).
+message Revocation {
+  // Revocation ULID, e.g. "rev_01J9Z…".
+  string revocation_id = 1;
+  // Blast radius.
+  RevocationScope scope = 2;
+  // Scoped key: RoE id / target string / capability name (empty for GLOBAL).
+  string key = 3;
+  // Issuing identity (operator RBAC; BreakGlass is human-only — commanders cannot
+  // freeze the fleet, Ruling C11).
+  string issued_by = 4;
+  // Issue time (UTC).
+  google.protobuf.Timestamp issued_at = 5;
+  // Human-readable reason, recorded in the audit chain (revocation.issued).
+  string reason = 6;
+  // Optional expiry for temporary revocations (absent = until lifted).
+  google.protobuf.Timestamp expires_at = 7;
+}
+
+// RevocationEvent — the bus payload on tasks.revocations.v1 (durable JetStream;
+// PEP revocation caches consult the set with ≤ 30 s TTL).
+message RevocationEvent {
+  // The revocation command.
+  Revocation revocation = 1;
+  // Event time (UTC).
+  google.protobuf.Timestamp ts = 2;
+}
+
+// RevokeRequest issues a revocation.
+message RevokeRequest {
+  // Blast radius.
+  RevocationScope scope = 1;
+  // Scoped key (empty for GLOBAL).
+  string key = 2;
+  // Issuing identity.
+  string issued_by = 3;
+  // Reason for the audit chain.
+  string reason = 4;
+  // Optional expiry.
+  google.protobuf.Timestamp expires_at = 5;
+}
+
+// RevokeResponse returns the issued revocation.
+message RevokeResponse {
+  // The issued revocation (already broadcast on tasks.revocations.v1).
+  Revocation revocation = 1;
+}
+
+// ListRevocationsRequest queries the active revocation set.
+message ListRevocationsRequest {
+  // Optional scope filter.
+  RevocationScope scope = 1;
+  // Optional key filter.
+  string key = 2;
+}
+
+// ListRevocationsResponse returns the matching active revocations.
+message ListRevocationsResponse {
+  // Active revocations.
+  repeated Revocation revocations = 1;
+}
+
+// RevocationService (doc 11 §2.1.7). Maintains the revocation set consulted by
+// policy-service (pipeline step 2) and cached by PEPs (TTL ≤ 30 s).
+service RevocationService {
+  // Issue a revocation (global / per-RoE / per-target / per-capability).
+  rpc Revoke(RevokeRequest) returns (RevokeResponse);
+  // List the active revocation set.
+  rpc ListRevocations(ListRevocationsRequest) returns (ListRevocationsResponse);
+}

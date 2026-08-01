@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aegisbastion.local/schemas/policy/v1/schema.json",
+  "title": "Phish-Catcher PolicyConfig v1",
+  "description": "Hub-pushed, signed policy (doc 07 §4.3). Signature: Ed25519 over JCS (RFC 8785) of the document minus the signature field.",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "policyVersion",
+    "issuedAt",
+    "expiresAt",
+    "thresholds",
+    "familyCaps",
+    "disabledChecks",
+    "weightOverrides",
+    "telemetry"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "policyVersion": { "type": "integer", "minimum": 0 },
+    "issuedAt": { "type": "string", "format": "date-time" },
+    "expiresAt": { "type": "string", "format": "date-time" },
+    "thresholds": {
+      "type": "object",
+      "required": ["malicious", "suspicious"],
+      "properties": {
+        "malicious": { "type": "number", "minimum": 0, "maximum": 100 },
+        "suspicious": { "type": "number", "minimum": 0, "maximum": 100 }
+      }
+    },
+    "familyCaps": {
+      "type": "object",
+      "required": ["url", "dom", "content", "auth", "reputation"],
+      "properties": {
+        "url": { "type": "number", "minimum": 0, "maximum": 100 },
+        "dom": { "type": "number", "minimum": 0, "maximum": 100 },
+        "content": { "type": "number", "minimum": 0, "maximum": 100 },
+        "auth": { "type": "number", "minimum": 0, "maximum": 100 },
+        "reputation": { "type": "number", "minimum": 0, "maximum": 100 }
+      }
+    },
+    "disabledChecks": { "type": "array", "items": { "type": "string" } },
+    "weightOverrides": {
+      "type": "object",
+      "additionalProperties": { "type": "number", "minimum": 0, "maximum": 100 }
+    },
+    "checkTimeboxMs": { "type": "number", "exclusiveMinimum": 0 },
+    "telemetry": {
+      "type": "object",
+      "required": ["enabled"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "endpoint": { "type": "string" },
+        "includeUrlHashes": { "type": "boolean" },
+        "includeBodySnippets": { "const": false }
+      }
+    },
+    "signature": { "type": "string", "contentEncoding": "base64url" }
+  }
+}

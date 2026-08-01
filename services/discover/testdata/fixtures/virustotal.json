@@ -1,0 +1,8 @@
+{
+  "data": [
+    { "id": "cdn.example.com", "type": "domain" },
+    { "id": "status.example.com", "type": "domain" },
+    { "id": "cdn.example.com", "type": "domain" }
+  ],
+  "meta": { "cursor": "abc123" }
+}

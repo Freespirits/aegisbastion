@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aegisbastion.io/schemas/alert/v1/cloudevents-alert-envelope.schema.json",
+  "title": "Alert CloudEvents Envelope v1",
+  "description": "CloudEvents 1.0 JSON-mode envelope for all alert bus messages (doc 05 §5.1). Published on the <module>.alert subjects — detect.alert (Ruling C8: source //aegisbastion/detect), monitor.alert, discover.alert, ddos.alert, redteam.alert, phish.alert (doc 05 §5.9). `data` is an AlertEvent v1 (alert-event.schema.json).",
+  "type": "object",
+  "required": ["specversion", "id", "source", "type", "time", "datacontenttype", "data"],
+  "additionalProperties": false,
+  "properties": {
+    "specversion": {
+      "description": "CloudEvents spec version — fixed \"1.0\".",
+      "type": "string",
+      "const": "1.0"
+    },
+    "id": {
+      "description": "Event id (ULID), e.g. \"evt_01J9ZC9V3Q…\". Matches the AlertEvent event_id.",
+      "type": "string",
+      "minLength": 1
+    },
+    "source": {
+      "description": "Producer URI-reference: //aegisbastion/<module>.",
+      "type": "string",
+      "pattern": "^//aegisbastion/(detect|monitor|discover|ddos-engine|ai-redteam|phish-catcher|commander)$"
+    },
+    "type": {
+      "description": "CloudEvents type — fixed com.aegisbastion.alert.v1.",
+      "type": "string",
+      "const": "com.aegisbastion.alert.v1"
+    },
+    "subject": {
+      "description": "Optional subject, e.g. \"asset/asset_88f3…\".",
+      "type": "string"
+    },
+    "time": {
+      "description": "Event time (RFC 3339).",
+      "type": "string",
+      "format": "date-time"
+    },
+    "datacontenttype": {
+      "description": "Fixed application/json.",
+      "type": "string",
+      "const": "application/json"
+    },
+    "data": {
+      "description": "The AlertEvent v1 payload.",
+      "$ref": "alert-event.schema.json"
+    }
+  }
+}

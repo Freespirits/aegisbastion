@@ -1,0 +1,135 @@
+syntax = "proto3";
+
+package aegisbastion.gatekeeper.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// audit-service — the audit of record (doc 11 §3.4): hash-chained, append-only,
+// WORM-exported log of every decision (allow AND deny), every RoE change, every
+// token mint/revocation, approvals, executions, revocations, admin actions.
+// R1–R3 are audit-gated: if the decision cannot be durably recorded, the
+// decision is deny (fail-closed, doc 11 §2.2 invariant / §7).
+option go_package = "github.com/aegisbastion/aegisbastion/gen/go/aegisbastion/gatekeeper/v1;gatekeeperv1";
+
+// AuditEventKind — the v1 event vocabulary (doc 11 §3.4).
+enum AuditEventKind {
+  // Zero value; unset.
+  AUDIT_EVENT_KIND_UNSPECIFIED = 0;
+  // An authorization decision (allow or deny).
+  AUDIT_EVENT_KIND_AUTHORIZATION_DECISION = 1;
+  // A Scope Token was minted.
+  AUDIT_EVENT_KIND_TOKEN_MINTED = 2;
+  // A Scope Token was revoked.
+  AUDIT_EVENT_KIND_TOKEN_REVOKED = 3;
+  // An RoE was created.
+  AUDIT_EVENT_KIND_ROE_CREATED = 4;
+  // An RoE was updated (new version).
+  AUDIT_EVENT_KIND_ROE_UPDATED = 5;
+  // An RoE was activated.
+  AUDIT_EVENT_KIND_ROE_ACTIVATED = 6;
+  // An RoE was suspended.
+  AUDIT_EVENT_KIND_ROE_SUSPENDED = 7;
+  // An RoE was revoked.
+  AUDIT_EVENT_KIND_ROE_REVOKED = 8;
+  // An approval was requested.
+  AUDIT_EVENT_KIND_APPROVAL_REQUESTED = 9;
+  // An approval was granted.
+  AUDIT_EVENT_KIND_APPROVAL_GRANTED = 10;
+  // An approval was rejected.
+  AUDIT_EVENT_KIND_APPROVAL_REJECTED = 11;
+  // Module execution started (forwarded from modules).
+  AUDIT_EVENT_KIND_EXECUTION_STARTED = 12;
+  // Module execution completed (forwarded from modules).
+  AUDIT_EVENT_KIND_EXECUTION_COMPLETED = 13;
+  // Module execution halted — kill-switch ACK (forwarded from modules).
+  AUDIT_EVENT_KIND_EXECUTION_HALTED = 14;
+  // A revocation was issued.
+  AUDIT_EVENT_KIND_REVOCATION_ISSUED = 15;
+  // An RBAC grant/revoke changed.
+  AUDIT_EVENT_KIND_RBAC_CHANGED = 16;
+  // An administrative action.
+  AUDIT_EVENT_KIND_ADMIN_ACTION = 17;
+}
+
+// AuditActor identifies who an event is about.
+message AuditActor {
+  // "service" | "user" | "commander" | "agent".
+  string kind = 1;
+  // Identity id, e.g. "svc-stress-engine".
+  string id = 2;
+  // SPIFFE workload id, e.g. "spiffe://platform/stress".
+  string spiffe_id = 3;
+}
+
+// AuditEvent — one link in the per-org chain (doc 11 §3.4).
+// event_hash = sha256(prev_hash || canonical_json(event_without_hash)) — a
+// single chain per partition (org_id), tamper-evident. Hot store: Postgres
+// partitioned by day (90-day retention, RLS by org_id). Cold/immutable: hourly
+// batch export with chain-tip hash; daily anchor to a second region (later:
+// external transparency witness).
+message AuditEvent {
+  // Event ULID, e.g. "evt_01J9Z…".
+  string event_id = 1;
+  // Chain sequence within the org partition.
+  uint64 seq = 2;
+  // Previous link's hash (hex; empty for genesis).
+  string prev_hash = 3;
+  // This event's hash (hex).
+  string event_hash = 4;
+  // Event kind.
+  AuditEventKind kind = 5;
+  // Who the event is about.
+  AuditActor actor = 6;
+  // When the event occurred (UTC).
+  google.protobuf.Timestamp occurred_at = 7;
+  // When the audit service recorded it (UTC).
+  google.protobuf.Timestamp recorded_at = 8;
+  // Object-storage reference for the full payload, e.g.
+  // "blob://audit-payloads/2026/07/30/evt_01J9Z….json".
+  string payload_ref = 9;
+  // SHA-256 of the referenced payload (hex).
+  string payload_sha256 = 10;
+  // OTel trace id, e.g. "tr_8821…".
+  string trace_id = 11;
+}
+
+// IngestAuditEventsRequest is one batch of events to chain and persist.
+message IngestAuditEventsRequest {
+  // Events to append (assigned seq/hashes server-side in chain order).
+  repeated AuditEvent events = 1;
+}
+
+// IngestAuditEventsResponse confirms durable persistence (the AUDIT_WRITE gate —
+// ingest failure must make R1+ decisions deny).
+message IngestAuditEventsResponse {
+  // Number of events durably recorded.
+  uint32 recorded = 1;
+}
+
+// VerifyChainRequest asks for a chain-integrity check (auditor API, doc 11 §3.4).
+message VerifyChainRequest {
+  // Org partition to verify.
+  string org_id = 1;
+  // First sequence to check (inclusive).
+  uint64 from_seq = 2;
+  // Last sequence to check (inclusive).
+  uint64 to_seq = 3;
+}
+
+// VerifyChainResponse reports validity and gaps.
+message VerifyChainResponse {
+  // True when the chain verifies end-to-end over the requested range.
+  bool valid = 1;
+  // Sequence numbers missing or failing verification.
+  repeated uint64 gaps = 2;
+}
+
+// AuditService (doc 11 §2.1.6): ingest API (gRPC + bus subscription on
+// audit.events), hash-chain builder, Postgres hot store, WORM exporter, SIEM
+// alerts via the Alert module (05).
+service AuditService {
+  // Chain and durably persist a batch of audit events (fail-closed semantics).
+  rpc IngestAuditEvents(IngestAuditEventsRequest) returns (IngestAuditEventsResponse);
+  // Verify chain integrity over a sequence range.
+  rpc VerifyChain(VerifyChainRequest) returns (VerifyChainResponse);
+}

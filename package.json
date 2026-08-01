@@ -1,0 +1,21 @@
+{
+  "name": "aegisbastion",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AegisBastion Connector Hub — monorepo root (contracts, schemas, codegen tooling)",
+  "workspaces": [
+    "gen/ts",
+    "sdks/ts"
+  ],
+  "scripts": {
+    "generate": "set \"PATH=%CD%\\bin;%PATH%\" && .\\bin\\buf.exe generate proto --template proto/buf.gen.yaml",
+    "validate:schemas": "node scripts/validate-schemas.mjs"
+  },
+  "devDependencies": {
+    "@bufbuild/protobuf": "^2.2.3",
+    "@bufbuild/protoc-gen-es": "^2.2.3",
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
+    "typescript": "^5.5.4"
+  }
+}

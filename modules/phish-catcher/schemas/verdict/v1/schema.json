@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aegisbastion.local/schemas/verdict/v1/schema.json",
+  "title": "Phish-Catcher Verdict v1",
+  "description": "Pipeline output (doc 07 §4.2) — always carries explanations; no black-box scores (§3.3).",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "verdict",
+    "score",
+    "familyScores",
+    "hardFail",
+    "hardFailReasons",
+    "findings",
+    "explanations",
+    "hints",
+    "timingMs",
+    "checkTimeouts",
+    "clientMeta"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "verdict": { "enum": ["clean", "suspicious", "malicious"] },
+    "score": { "type": "integer", "minimum": 0, "maximum": 100 },
+    "familyScores": {
+      "type": "object",
+      "required": ["url", "dom", "content", "auth", "reputation"],
+      "properties": {
+        "url": { "type": "number", "minimum": 0, "maximum": 100 },
+        "dom": { "type": "number", "minimum": 0, "maximum": 100 },
+        "content": { "type": "number", "minimum": 0, "maximum": 100 },
+        "auth": { "type": "number", "minimum": 0, "maximum": 100 },
+        "reputation": { "type": "number", "minimum": 0, "maximum": 100 }
+      }
+    },
+    "hardFail": { "type": "boolean" },
+    "hardFailReasons": { "type": "array", "items": { "type": "string" } },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["ruleId", "severity", "weight", "detail"],
+        "properties": {
+          "ruleId": { "type": "string" },
+          "severity": { "enum": ["info", "low", "medium", "high", "critical"] },
+          "weight": { "type": "number", "minimum": 0, "maximum": 100 },
+          "detail": { "type": "string" },
+          "flags": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "explanations": { "type": "array", "items": { "type": "string" } },
+    "hints": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "sandbox_recommended": { "type": "boolean" }
+        }
+      }
+    },
+    "timingMs": { "type": "number", "minimum": 0 },
+    "checkTimeouts": { "type": "array", "items": { "type": "string" } },
+    "clientMeta": {
+      "type": "object",
+      "required": ["libVersion", "bundleVersion", "policyVersion"],
+      "properties": {
+        "libVersion": { "type": "string" },
+        "bundleVersion": { "type": "string" },
+        "policyVersion": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "meta": {
+      "type": "object",
+      "properties": {
+        "degradedIntel": { "type": "boolean" },
+        "extractionDegraded": { "type": "boolean" }
+      }
+    }
+  }
+}

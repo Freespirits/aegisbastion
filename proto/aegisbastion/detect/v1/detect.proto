@@ -1,0 +1,196 @@
+syntax = "proto3";
+
+package aegisbastion.detect.v1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+// Detect module contracts (doc 04 §4). Registered capabilities (AgentManifest,
+// risk_class_max R2; every capability requires a gatekeeper Scope Token):
+//   detect.scan.web      R2  web/app scanning (Nuclei + ZAP + custom checks)
+//   detect.scan.network  R2  port/service/vuln scanning (Nmap+NSE, testssl)
+//   detect.scan.api      R2  API-focused scanning (REST/GraphQL)
+//   detect.revalidate    R2  re-verify an existing finding
+//   detect.enrich        R1  light service/version fingerprint refresh
+option go_package = "github.com/aegisbastion/aegisbastion/gen/go/aegisbastion/detect/v1;detectv1";
+
+// Severity — CVSS-derived bands (doc 04 §4.3).
+enum Severity {
+  // Zero value; unset.
+  SEVERITY_UNSPECIFIED = 0;
+  // Informational.
+  SEVERITY_INFORMATIONAL = 1;
+  // Low.
+  SEVERITY_LOW = 2;
+  // Medium.
+  SEVERITY_MEDIUM = 3;
+  // High.
+  SEVERITY_HIGH = 4;
+  // Critical.
+  SEVERITY_CRITICAL = 5;
+}
+
+// ValidationVerdict — the runtime-Active validation outcome (doc 04 §4.3). The
+// zero-false-positive contract: only CONFIRMED findings at/above the risk-tier
+// threshold are mapped to detect.alert; INCONCLUSIVE and NOT_VALIDATABLE never
+// alert (Ruling C8).
+enum ValidationVerdict {
+  // Zero value; unset.
+  VALIDATION_VERDICT_UNSPECIFIED = 0;
+  // Reproduced at runtime.
+  VALIDATION_VERDICT_CONFIRMED = 1;
+  // Could not be reproduced.
+  VALIDATION_VERDICT_NOT_REPRODUCIBLE = 2;
+  // Validation could not reach a conclusion.
+  VALIDATION_VERDICT_INCONCLUSIVE = 3;
+  // No validator exists for this finding class.
+  VALIDATION_VERDICT_NOT_VALIDATABLE = 4;
+}
+
+// FindingStatus — the lifecycle state machine (doc 04 §7.3); persisted by the
+// data platform (module 09), with a local MVP fallback table in Detect.
+enum FindingStatus {
+  // Zero value; unset.
+  FINDING_STATUS_UNSPECIFIED = 0;
+  // Newly reported.
+  FINDING_STATUS_OPEN = 1;
+  // Confirmed and tracked.
+  FINDING_STATUS_CONFIRMED = 2;
+  // Fix underway.
+  FINDING_STATUS_REMEDIATING = 3;
+  // Remediation verified via detect.revalidate.
+  FINDING_STATUS_RESOLVED = 4;
+  // Reappeared after resolution (regression).
+  FINDING_STATUS_REGRESSED = 5;
+  // Suppressed as accepted risk / false positive.
+  FINDING_STATUS_SUPPRESSED = 6;
+}
+
+// Vulnerability identifies what was found (doc 04 §4.3).
+message Vulnerability {
+  // CVE when known, else the template/check id, e.g. "CVE-2024-3400".
+  string id = 1;
+  // Check source: "nuclei" | "nmap-nse" | "zap" | "testssl" | "custom".
+  string source = 2;
+  // Template/check id, e.g. "cve-2024-3400".
+  string template_id = 3;
+  // Title, e.g. "Palo Alto PAN-OS command injection".
+  string title = 4;
+  // CWE id, e.g. "CWE-77".
+  string cwe = 5;
+  // Reference URLs.
+  repeated string references = 6;
+}
+
+// Validation records the runtime verification of a finding (doc 04 §4.3).
+message Validation {
+  // Outcome.
+  ValidationVerdict verdict = 1;
+  // Validator used: "ave.*" (Active Validation Engine) or "evs.poc"
+  // (Exploit-Verification Sandbox), e.g. "ave.http_replay".
+  string method = 2;
+  // Evidence objects, e.g. "s3://artifacts/msn_…/tsk_…/fnd_…/transcript.http".
+  repeated string evidence_refs = 3;
+  // When validation ran (UTC).
+  google.protobuf.Timestamp validated_at = 4;
+  // Validator build, e.g. "ave-0.3.1".
+  string validator_version = 5;
+  // Validator confidence 0..1.
+  double confidence = 6;
+}
+
+// RiskScore — the risk-v1 scorer output (doc 04 §8).
+message RiskScore {
+  // 0–100 score.
+  uint32 score = 1;
+  // Priority tier, e.g. "P1".
+  string tier = 2;
+  // Scorer build — "risk-v1".
+  string scorer_version = 3;
+  // Scoring factors, e.g. {"cvss": 10.0, "epss": 0.94, "kev": true,
+  // "exposure": "internet", "asset_criticality": "high",
+  // "exploit_verified": true, "verdict": "CONFIRMED"}.
+  google.protobuf.Struct factors = 4;
+}
+
+// FindingReport — published on detect.findings inside the doc 01 §8.2 Envelope
+// (doc 04 §4.3). detect.findings is the canonical full stream (→ module 09,
+// commanders via mission.events rollups).
+//
+// Alert mapping — detect.alert (Ruling C8): the Coordinator's alert mapper
+// re-publishes a subset in AlertEvent v1 (doc 05 §5.2 JSON schema, CloudEvents
+// 1.0 envelope, source //aegisbastion/detect) with these rules:
+//   - include only validation.verdict = CONFIRMED at/above a configurable
+//     risk-tier threshold (default P2);
+//   - authorization_token_id MANDATORY — the task's Scope Token jti;
+//   - severity ← CVSS band; confidence ← confirmed; category ← vuln;
+//     fingerprint_hint ← fingerprint; asset.identifier ← target;
+//     evidence ← {scanner, proof: evidence_refs, references};
+//     pii_classification ← none (Detect canaries are synthetic, doc 04 §10.5).
+message FindingReport {
+  // ULID assigned by Detect, e.g. "fnd_01J9A7…".
+  string finding_id = 1;
+  // Dedup key ("sha256:…", doc 04 §7.2); cross-run dedup + regression detection.
+  string fingerprint = 2;
+  // Owning mission.
+  string mission_id = 3;
+  // Task that produced the finding.
+  string task_id = 4;
+  // RoE authorizing the scan.
+  string roe_id = 5;
+  // Scanned target, e.g. "https://api.acme.com/login".
+  string target = 6;
+  // Resolved asset reference, e.g. "asset:host:api.acme.com".
+  string asset_ref = 7;
+  // What was found.
+  Vulnerability vulnerability = 8;
+  // CVSS-derived severity band.
+  Severity severity = 9;
+  // Runtime validation record.
+  Validation validation = 10;
+  // risk-v1 score.
+  RiskScore risk = 11;
+  // Lifecycle state.
+  FindingStatus status = 12;
+  // First time this fingerprint was seen (UTC).
+  google.protobuf.Timestamp first_seen = 13;
+  // Most recent sighting (UTC).
+  google.protobuf.Timestamp last_seen = 14;
+  // Sighting count.
+  uint64 occurrences = 15;
+}
+
+// ScanProfile — preset check sets + pacing (doc 04 §4.2).
+enum ScanProfile {
+  // Zero value; unset.
+  SCAN_PROFILE_UNSPECIFIED = 0;
+  // Fast pass.
+  SCAN_PROFILE_QUICK = 1;
+  // Default.
+  SCAN_PROFILE_STANDARD = 2;
+  // Exhaustive.
+  SCAN_PROFILE_DEEP = 3;
+}
+
+// ScanParams — the detect.scan.* task params (doc 04 §4.2, wire-exact inside
+// TaskSpec.params / TaskAssignment.params).
+message ScanParams {
+  // Preset profile.
+  ScanProfile profile = 1;
+  // Optional explicit allowlist of checks, e.g. ["nuclei:cve-2024-3400"].
+  repeated string check_ids = 2;
+  // Optional denylist, e.g. ["nuclei:dos-*"]; DoS-class checks are ALWAYS
+  // excluded regardless (doc 04 §10.3).
+  repeated string exclude_check_ids = 3;
+  // Force sandbox verification even below HIGH severity.
+  bool exploit_verify = 4;
+  // Hard request ceiling for the whole task.
+  uint32 max_requests = 5;
+  // Port selection for network scans, e.g. "top-1000".
+  string ports = 6;
+  // Artifact ref to an OpenAPI/GraphQL schema for detect.scan.api.
+  string spec_ref = 7;
+  // Default true; false ONLY when the RoE permits (doc 04 §10.3 destructive-check
+  // policy).
+  bool safe_mode = 8;
+}

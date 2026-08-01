@@ -1,0 +1,32 @@
+{
+  "schema_version": "1.0",
+  "event_id": "evt_01J9ZC9V3Q",
+  "org_id": "org_acme",
+  "source_module": "detect",
+  "source_event_id": "fnd_01J9A7K2",
+  "authorization_token_id": "tok_01J9ZM8W3F",
+  "fingerprint_hint": "sha256:8c41aa2f",
+  "title": "Confirmed RCE exposure: PAN-OS command injection",
+  "description": "Runtime-validated on https://api.acme.com/login (ave.http_replay).",
+  "severity": "critical",
+  "confidence": "confirmed",
+  "category": "vuln",
+  "asset": {
+    "asset_id": "asset_88f3",
+    "kind": "subdomain",
+    "identifier": "api.acme.com",
+    "criticality": "high",
+    "owner_group": "team-platform"
+  },
+  "evidence": {
+    "scanner": "nuclei",
+    "proof": ["s3://artifacts/msn_01J8ZK/tsk_01J92H/fnd_01J9A7/transcript.http"],
+    "references": ["https://nvd.nist.gov/vuln/detail/CVE-2024-3400"]
+  },
+  "pii_classification": "none",
+  "occurred_at": "2026-07-30T06:59:41Z",
+  "dedup_window_seconds": 86400,
+  "renotify_every": 0,
+  "requires_ack": true,
+  "labels": { "playbook": "internet-facing-rce" }
+}

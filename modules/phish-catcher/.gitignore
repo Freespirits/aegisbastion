@@ -1,0 +1,4 @@
+# Build outputs (rebuild: npm run build / npm run build:ext / npm run pack:ext)
+dist/
+extension/dist/
+release/

@@ -1,0 +1,78 @@
+syntax = "proto3";
+
+package aegisbastion.platform.v1;
+
+import "google/protobuf/struct.proto";
+import "aegisbastion/platform/v1/types.proto";
+
+// TaskPlan — the commander→Orchestrator contract (doc 01 §5.2). Commanders
+// propose; the Orchestrator may accept, partially accept (strip unauthorized
+// tasks), reorder, defer, or reject (doc 01 §4.2 rule 2).
+option go_package = "github.com/aegisbastion/aegisbastion/gen/go/aegisbastion/platform/v1;platformv1";
+
+// TaskSpec is one unit of work inside a plan (doc 01 §5.2).
+message TaskSpec {
+  // Unique within the plan; used by depends_on edges.
+  string task_key = 1;
+  // Capability name — must exist in the Agent Registry (e.g. "recon.subdomain_enum",
+  // "monitor.watch", "detect.scan.web"). Unregistered capabilities are rejected
+  // (doc 01 §9 item 2).
+  string capability = 2;
+  // Declared risk class; must be ≤ the capability's risk_class_max and ≤ the RoE's
+  // allowed classes (doc 01 §6.1 step 4).
+  RiskClass risk_class = 3;
+  // Concrete targets; every target must match RoE scope and no exclusion
+  // (exclusions always win; canonicalized longest-prefix/exact-host matching).
+  repeated string targets = 4;
+  // Capability-specific parameters (wire schemas are owned by each module doc —
+  // e.g. monitor/v1 WatchParams, detect/v1 ScanParams — serialized to Struct).
+  google.protobuf.Struct params = 5;
+  // task_keys this task depends on (plan is a DAG).
+  repeated string depends_on = 6;
+  // Per-task timeout in seconds.
+  uint32 timeout_s = 7;
+  // Maximum redeliveries before the task goes DEAD.
+  uint32 max_retries = 8;
+}
+
+// TaskPlan — a DAG of TaskSpecs submitted by a commander (doc 01 §5.2). Plans are
+// incremental: commanders refine continuously, especially Monitor-driven missions.
+message TaskPlan {
+  // Server- or adapter-assigned ULID, e.g. "pln_01J90A…".
+  string plan_id = 1;
+  // Mission this plan belongs to.
+  string mission_id = 2;
+  // Commander that submitted the plan (tagged by the adapter after mTLS auth).
+  Commander submitted_by = 3;
+  // Set on cross-commander delegation: the owning commander id that delegated
+  // this sub-plan (doc 01 §4.2 rule 1). Empty when submitted by the owner.
+  string delegated_by = 4;
+  // Commander-scoped idempotency key, e.g. "hexstrike:msn_01J8ZK:plan:7".
+  string idempotency_key = 5;
+  // The task DAG.
+  repeated TaskSpec tasks = 6;
+}
+
+// TaskVerdict is the Orchestrator's per-task decision inside a PlanVerdict.
+message TaskVerdict {
+  // The task_key this verdict applies to.
+  string task_key = 1;
+  // True when the task passed validation and entered QUEUED.
+  bool accepted = 2;
+  // Rejection reason for stripped tasks (e.g. "capability not registered",
+  // "target excluded by RoE"). Empty when accepted.
+  string reason = 3;
+}
+
+// PlanVerdict is the Orchestrator's decision on a submitted plan.
+enum PlanDecision {
+  // Zero value; unset.
+  PLAN_DECISION_UNSPECIFIED = 0;
+  // All tasks accepted.
+  PLAN_DECISION_ACCEPTED = 1;
+  // Some tasks stripped as unauthorized; remainder queued. Commander should replan
+  // for the stripped set.
+  PLAN_DECISION_PARTIAL = 2;
+  // Nothing accepted.
+  PLAN_DECISION_REJECTED = 3;
+}

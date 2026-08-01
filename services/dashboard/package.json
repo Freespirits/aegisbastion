@@ -1,0 +1,36 @@
+{
+  "name": "@aegisbastion/dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AegisBastion operator dashboard (doc 10) — MVP-A thin slice: OIDC+RBAC+step-up, attack-surface map and findings via data-platform (09), gated task launch via platform-core Mission API (01), RoE management via gatekeeper admin-api (11), plan-approval queue, alert-rules client of herald (05).",
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "cytoscape": "^3.31.2",
+    "jose": "^6.0.10",
+    "next": "^15.3.3",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@testing-library/dom": "^10.4.0",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.3.0",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/cytoscape": "^3.21.8",
+    "@types/node": "^22.15.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^4.4.1",
+    "jsdom": "^26.1.0",
+    "typescript": "^5.8.3",
+    "vitest": "^3.1.4"
+  }
+}

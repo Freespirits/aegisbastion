@@ -1,0 +1,466 @@
+# AegisBastion Connector Hub — MVP-A local deployment (doc 01 §14, Ruling C6).
+#
+# One Docker-Compose host: Postgres 16 + NATS JetStream + MinIO + the
+# platform services. Profiles:
+#
+#   infra  — the stateful tier plus one-shot provisioners (db-migrate,
+#            minio-init, jetstream-bootstrap). Starts independently today:
+#              docker compose --profile infra up -d
+#   apps   — buildable service placeholders (Dockerfiles land in later
+#            implementation waves under services/<module>/):
+#              docker compose --profile infra --profile apps up -d --build
+#
+# Tear down (keep volumes):   docker compose down
+# Tear down (wipe data):      docker compose down -v
+#
+# All secrets below are local-dev defaults, overridable via deploy/.env
+# (see .env.example). Nothing here is production configuration.
+
+name: aegisbastion-mvp-a
+
+x-db-env: &db-env
+  POSTGRES_USER: ${POSTGRES_USER:-aegisbastion}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aegisbastion-dev}
+  POSTGRES_DB: ${POSTGRES_DB:-aegisbastion}
+
+x-database-url: &database-url
+  DATABASE_URL: postgres://${POSTGRES_USER:-aegisbastion}:${POSTGRES_PASSWORD:-aegisbastion-dev}@postgres:5432/${POSTGRES_DB:-aegisbastion}?sslmode=disable
+
+x-bus-env: &bus-env
+  NATS_URL: nats://nats:4222
+
+x-object-env: &object-env
+  S3_ENDPOINT: minio:9000
+  S3_ACCESS_KEY: ${MINIO_ROOT_USER:-aegisbastion}
+  S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-aegisbastion-dev-secret}
+  S3_USE_TLS: "false"
+
+x-gatekeeper-env: &gatekeeper-env
+  GATEKEEPER_GRPC_ADDR: gatekeeper:50051
+  GATEKEEPER_ADMIN_URL: http://gatekeeper:8080
+  GATEKEEPER_JWKS_URL: http://gatekeeper:8080/.well-known/gatekeeper-jwks.json
+
+x-app-depends: &app-depends
+  postgres:
+    condition: service_healthy
+  db-migrate:
+    condition: service_completed_successfully
+  nats:
+    condition: service_started
+  jetstream-bootstrap:
+    condition: service_completed_successfully
+  minio:
+    condition: service_started
+
+services:
+  # =========================================================================
+  # Infra tier (profile: infra) — runs standalone today
+  # =========================================================================
+  postgres:
+    image: postgres:16-alpine
+    profiles: ["infra"]
+    environment:
+      <<: *db-env
+      # One database, schema-per-bounded-context (platform / gatekeeper / dp /
+      # tenancy / discover / monitor / detect) — created by db/migrations.
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # db-init: applies db/migrations (golang-migrate format) and exits.
+  db-migrate:
+    image: migrate/migrate:4
+    profiles: ["infra"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ../db/migrations:/migrations:ro
+    command:
+      - "-path=/migrations"
+      - "-database"
+      - "postgres://${POSTGRES_USER:-aegisbastion}:${POSTGRES_PASSWORD:-aegisbastion-dev}@postgres:5432/${POSTGRES_DB:-aegisbastion}?sslmode=disable"
+      - "up"
+    restart: "no"
+
+  nats:
+    image: nats:2.11-alpine
+    profiles: ["infra"]
+    command: ["-js", "-m", "8222", "--name", "aegisbastion-mvp"]
+    ports:
+      - "${NATS_PORT:-4222}:4222"      # client
+      - "${NATS_MON_PORT:-8222}:8222"  # monitoring (/healthz, /jsz)
+    volumes:
+      - natsdata:/data
+    restart: unless-stopped
+
+  # Creates the canonical streams/subjects + KV buckets and exits (idempotent).
+  jetstream-bootstrap:
+    build: ./jetstream-bootstrap
+    profiles: ["infra"]
+    depends_on:
+      nats:
+        condition: service_started
+    environment:
+      <<: *bus-env
+    restart: "no"
+
+  minio:
+    image: minio/minio:latest
+    profiles: ["infra"]
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-aegisbastion}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-aegisbastion-dev-secret}
+    ports:
+      - "${MINIO_PORT:-9000}:9000"      # S3 API
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/minio/health/live || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  # Creates the buckets the contracts reference and exits (idempotent):
+  #   artifacts        — task artifact uploads (doc 01 §5.6/§5.7)
+  #   evidence         — finding evidence blobs, tenant-scoped (doc 09)
+  #   token-manifests  — hashed target/scope manifests (doc 11 §3.2, blob://tokens/<jti>/…)
+  #   legal-artifacts  — RoE legal artifact documents (doc 11 §3.1)
+  #   audit-payloads   — large audit payload refs (doc 11 §3.4)
+  #   monitor-raw      — monitor raw probe bodies, 30 d lifecycle (doc 03 §8/§9.5)
+  minio-init:
+    image: minio/mc:latest
+    profiles: ["infra"]
+    depends_on:
+      minio:
+        condition: service_started
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        until mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}" >/dev/null 2>&1; do
+          echo "minio-init: waiting for minio…"; sleep 2;
+        done
+        for b in artifacts evidence token-manifests legal-artifacts audit-payloads monitor-raw; do
+          mc mb --ignore-existing "local/$${b}" && echo "bucket: $${b}"
+        done
+        mc ilm rule add --expire-days 30 local/monitor-raw >/dev/null 2>&1 || true
+        echo "minio-init: done"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-aegisbastion}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-aegisbastion-dev-secret}
+    restart: "no"
+
+  # =========================================================================
+  # App tier (profile: apps) — buildable placeholders; Dockerfiles are added
+  # by the service implementation waves at services/<module>/Dockerfile.
+  # `docker compose --profile infra up` never builds or starts these.
+  # =========================================================================
+
+  # doc 11: the single PDP — roe/token/policy/rbac/audit/revocation/approval
+  # services + admin-api, deployed as one Compose binary (doc 00 §3 Phase 0).
+  gatekeeper:
+    build:
+      context: ../services/gatekeeper
+      dockerfile: Dockerfile
+    profiles: ["apps"]
+    environment:
+      <<: [*database-url, *bus-env, *object-env]
+      DB_SEARCH_PATH: gatekeeper
+      GATEKEEPER_SIGNING_KEY_FILE: /run/secrets/gatekeeper_ed25519.key  # MVP-A: sealed file key (doc 00 §5 Q1)
+      TOKEN_TTL: 15m                                                  # R1–R3 uniform (Ruling C5)
+      TOKEN_AUDIENCE: aegisbastion.modules
+    ports:
+      - "${GATEKEEPER_GRPC_PORT:-50051}:50051"  # gRPC gatekeeper.v1 (Authorize etc.)
+      - "${GATEKEEPER_HTTP_PORT:-8080}:8080"    # admin-api REST + JWKS endpoint
+    depends_on: *app-depends
+    restart: unless-stopped
+
+  # doc 01: Mission API (REST gateway) + Orchestrator + dispatch PEP +
+  # Scheduler + Agent Registry + kill switch.
+  platform-core:
+    build:
+      context: ../services/platform-core
+      dockerfile: Dockerfile
+      # Generated stubs module (go.mod `replace ../../gen/go`) is outside the
+      # build context; staged as a named context for the Dockerfile.
+      additional_contexts:
+        gen-go: ../gen/go
+    profiles: ["apps"]
+    environment:
+      <<: [*database-url, *bus-env, *object-env, *gatekeeper-env]
+      DB_SEARCH_PATH: platform
+    ports:
+      - "${PLATFORM_REST_PORT:-8081}:8081"    # Mission API (REST gateway, doc 01 §7.3)
+      - "${PLATFORM_GRPC_PORT:-50052}:50052"  # PlannerAPI + AgentAPI (doc 01 §7.2/§8.3)
+    depends_on:
+      <<: *app-depends
+      gatekeeper:
+        condition: service_started
+    restart: unless-stopped
+
+  # doc 09: Ingest API + GraphQL Query API + TPEL over the dp/tenancy schemas.
+  data-platform:
+    build:
+      context: ../services/data-platform
+      dockerfile: Dockerfile
+      # Generated stubs and Go agent SDK modules (go.mod `replace ../../gen/go`
+      # and `../../sdks/go`) are outside the build context; staged as named
+      # contexts for the Dockerfile (same pattern as platform-core).
+      additional_contexts:
+        gen-go: ../gen/go
+        sdks-go: ../sdks/go
+    profiles: ["apps"]
+    environment:
+      <<: [*database-url, *bus-env, *object-env, *gatekeeper-env]
+      DB_SEARCH_PATH: dp,tenancy
+    ports:
+      - "${DP_HTTP_PORT:-8082}:8082"          # /v1/ingest/batch + GraphQL /v1/query
+    depends_on:
+      <<: *app-depends
+      gatekeeper:
+        condition: service_started
+    restart: unless-stopped
+
+  # doc 02: Discover (EASM) — passive/CT/credentialed-cloud workers.
+  discover:
+    build:
+      context: ../services/discover
+      dockerfile: Dockerfile
+      # go.mod `replace` directives point at ../../gen/go and ../../sdks/go —
+      # staged as named contexts (same pattern as platform-core).
+      additional_contexts:
+        gen-go: ../gen/go
+        sdks-go: ../sdks/go
+    profiles: ["apps"]
+    environment:
+      <<: [*database-url, *bus-env, *object-env, *gatekeeper-env]
+      DB_SEARCH_PATH: discover
+      DP_INGEST_URL: http://data-platform:8082
+      DP_PRINCIPAL: svc-discover
+      DISCOVER_CONNECTORS_FILE: /etc/discover/connectors.yaml
+    ports:
+      - "${DISCOVER_HTTP_PORT:-8083}:8083"
+    depends_on:
+      <<: *app-depends
+      gatekeeper:
+        condition: service_started
+      data-platform:
+        condition: service_started
+    restart: unless-stopped
+
+  # doc 02 §2.2 worker pools — same image, per-lane roles (one Deployment per
+  # pool in the K8s track; Compose runs one replica each at MVP-A).
+  discover-worker-passive:
+    build:
+      context: ../services/discover
+      dockerfile: Dockerfile
+      additional_contexts:
+        gen-go: ../gen/go
+        sdks-go: ../sdks/go
+    profiles: ["apps"]
+    # The image ENTRYPOINT is /bin/orchestrator; compose `command:` would be
+    # passed to it as argv, so the role binaries must override the entrypoint.
+    entrypoint: ["/bin/worker-passive"]
+    environment:
+      <<: [*database-url, *bus-env, *object-env, *gatekeeper-env]
+      DB_SEARCH_PATH: discover
+      DISCOVER_CONNECTORS_FILE: /etc/discover/connectors.yaml
+    depends_on:
+      <<: *app-depends
+      gatekeeper:
+        condition: service_started
+    restart: unless-stopped
+
+  discover-worker-ct:
+    build:
+      context: ../services/discover
+      dockerfile: Dockerfile
+      additional_contexts:
+        gen-go: ../gen/go
+        sdks-go: ../sdks/go
+    profiles: ["apps"]
+    entrypoint: ["/bin/worker-ct"]
+    environment:
+      <<: [*database-url, *bus-env, *object-env, *gatekeeper-env]
+      DB_SEARCH_PATH: discover
+      DISCOVER_CONNECTORS_FILE: /etc/discover/connectors.yaml
+    depends_on:
+      <<: *app-depends
+      gatekeeper:
+        condition: service_started
+    restart: unless-stopped
+
+  discover-worker-cloud:
+    build:
+      context: ../services/discover
+      dockerfile: Dockerfile
+      additional_contexts:
+        gen-go: ../gen/go
+        sdks-go: ../sdks/go
+    profiles: ["apps"]
+    entrypoint: ["/bin/worker-cloud"]
+    environment:
+      <<: [*database-url, *bus-env, *object-env, *gatekeeper-env]
+      DB_SEARCH_PATH: discover
+      DISCOVER_CONNECTORS_FILE: /etc/discover/connectors.yaml
+    depends_on:
+      <<: *app-depends
+      gatekeeper:
+        condition: service_started
+    restart: unless-stopped
+
+  # doc 02 §3.1: MCP server for HexStrike's orchestration runtime (same
+  # service layer as the REST API — no logic forks).
+  discover-mcp:
+    build:
+      context: ../services/discover
+      dockerfile: Dockerfile
+      additional_contexts:
+        gen-go: ../gen/go
+        sdks-go: ../sdks/go
+    profiles: ["apps"]
+    entrypoint: ["/bin/discover-mcp"]
+    environment:
+      <<: [*database-url, *bus-env, *object-env, *gatekeeper-env]
+      DB_SEARCH_PATH: discover
+    ports:
+      - "${DISCOVER_MCP_PORT:-8087}:8087"
+    depends_on:
+      <<: *app-depends
+      gatekeeper:
+        condition: service_started
+    restart: unless-stopped
+
+  # doc 03: Monitor — 24/7 change detection (monitor.watch/monitor.rescan R1,
+  # scope-bound watch tokens).
+  monitor:
+    build:
+      context: ../services/monitor
+      dockerfile: Dockerfile
+      # Generated stubs module + Go agent SDK (go.mod `replace ../../gen/go`
+      # and `../../sdks/go`) are outside the build context; staged as named
+      # contexts for the Dockerfile.
+      additional_contexts:
+        gen-go: ../gen/go
+        sdks-go: ../sdks/go
+    profiles: ["apps"]
+    environment:
+      <<: [*database-url, *bus-env, *object-env, *gatekeeper-env]
+      DB_SEARCH_PATH: monitor
+      MONITOR_RAW_BUCKET: monitor-raw
+    ports:
+      - "${MONITOR_HTTP_PORT:-8084}:8084"
+    depends_on:
+      <<: *app-depends
+      gatekeeper:
+        condition: service_started
+      data-platform:
+        condition: service_started
+    restart: unless-stopped
+
+  # doc 04: Detect — vuln scanning + AVE/EVS validation (R1–R2).
+  detect:
+    build:
+      context: ../services/detect
+      dockerfile: Dockerfile
+      # Generated stubs module + Go agent SDK (go.mod `replace ../../gen/go`
+      # and `../../sdks/go`) are outside the build context; staged as named
+      # contexts for the Dockerfile.
+      additional_contexts:
+        gen-go: ../gen/go
+        sdks-go: ../sdks/go
+    profiles: ["apps"]
+    environment:
+      <<: [*database-url, *bus-env, *object-env, *gatekeeper-env]
+      DB_SEARCH_PATH: detect
+      REGISTRY_ADDR: platform-core:50052
+      DETECT_FINDINGS_FALLBACK: "true"   # use detect.findings_fallback until 09 ingest is wired (doc 04 §13)
+      DP_INGEST_URL: http://data-platform:8082  # data-platform Ingest API (used when fallback is disabled)
+      DETECT_OOB_PUBLIC_BASE: http://detect:8090
+      DETECT_EVS_RUNNER: local           # process-isolated local runner; gVisor needs a runsc host (doc 04 §9)
+    ports:
+      - "${DETECT_HTTP_PORT:-8085}:8085"  # /healthz /readyz
+      - "${DETECT_OOB_PORT:-8090}:8090"   # OOB interaction service (canary callbacks)
+    depends_on:
+      <<: *app-depends
+      gatekeeper:
+        condition: service_started
+      platform-core:
+        condition: service_started
+      data-platform:
+        condition: service_started
+    restart: unless-stopped
+
+  # doc 05: Alert (herald) — sole notification egress (Ruling C7).
+  alert:
+    build:
+      context: ../services/alert
+      dockerfile: Dockerfile
+    profiles: ["apps"]
+    environment:
+      <<: [*database-url, *bus-env, *object-env, *gatekeeper-env]
+      DP_QUERY_URL: http://data-platform:8082  # doc 09 GraphQL base (herald appends /v1/query; TPEL principal "herald")
+      # §13.7 admin actors for policy mutations. The dashboard alert-rules UI
+      # forwards the logged-in operator principal as X-AegisBastion-Actor; add
+      # operator principals via deploy/.env (comma-separated) or those
+      # mutations get 403.
+      HERALD_ADMIN_ACTORS: ${HERALD_ADMIN_ACTORS:-cai,hexstrike-ai}
+      # Channel credentials come from deploy/.env at delivery time:
+      ALERT_SLACK_WEBHOOK_URL: ${ALERT_SLACK_WEBHOOK_URL:-}
+      ALERT_WEBHOOK_SIGNING_SECRET: ${ALERT_WEBHOOK_SIGNING_SECRET:-}
+      # 'record' (default) writes deliveries to the outbox only; 'live' actually
+      # calls Slack/webhook/Teams/Splunk/syslog endpoints.
+      HERALD_DELIVERY_MODE: ${HERALD_DELIVERY_MODE:-record}
+    ports:
+      - "${ALERT_HTTP_PORT:-8086}:8086"
+    depends_on:
+      <<: *app-depends
+      gatekeeper:
+        condition: service_started
+      data-platform:
+        condition: service_started
+    restart: unless-stopped
+
+  # doc 10: operator dashboard (thin slice).
+  dashboard:
+    build:
+      context: ../services/dashboard
+      dockerfile: Dockerfile
+    profiles: ["apps"]
+    environment:
+      # Names must match services/dashboard/src/env.ts (it reads *_URL).
+      PLATFORM_CORE_URL: http://platform-core:8081
+      DATA_PLATFORM_URL: http://data-platform:8082
+      GATEKEEPER_URL: http://gatekeeper:8080
+      HERALD_URL: http://alert:8086
+      # Session/auth: env.ts throws without SESSION_SECRET unless dev auth is
+      # on; both come from deploy/.env (dev defaults only).
+      SESSION_SECRET: ${SESSION_SECRET:-}
+      DEV_AUTH_ENABLED: ${DEV_AUTH_ENABLED:-true}
+      OIDC_ISSUER: ${OIDC_ISSUER_URL:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+    ports:
+      - "${DASHBOARD_PORT:-3000}:3000"
+    depends_on:
+      platform-core:
+        condition: service_started
+      data-platform:
+        condition: service_started
+      gatekeeper:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  natsdata:
+  miniodata:

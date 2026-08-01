@@ -1,0 +1,11 @@
+{
+  "domain": "example.com",
+  "tags": ["ipv4"],
+  "data": [
+    { "subdomain": "www", "type": "A", "value": "203.0.113.10", "last_seen": "2026-07-01" },
+    { "subdomain": "www", "type": "AAAA", "value": "2001:db8::10", "last_seen": "2026-07-01" },
+    { "subdomain": "api", "type": "A", "value": "203.0.113.11", "last_seen": "2026-07-02" },
+    { "subdomain": "api", "type": "CNAME", "value": "edge.example.net", "last_seen": "2026-07-02" }
+  ],
+  "subdomains": ["www", "api"]
+}

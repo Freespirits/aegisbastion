@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aegisbastion.local/schemas/intel-bundle/v1/schema.json",
+  "title": "Phish-Catcher IntelBundle v1",
+  "description": "Signed, versioned offline reputation bundle (doc 07 §4.4). Ed25519 over JCS (RFC 8785), dual-pinned keys, monotonic version, 14-day staleness bound.",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "bundleVersion",
+    "issuedAt",
+    "expiresAt",
+    "blocklistBloom",
+    "blocklistExact",
+    "brandDomains",
+    "signature"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "bundleVersion": { "type": "string", "pattern": "^\\d{4}\\.\\d{2}\\.\\d{2}-\\d+$" },
+    "issuedAt": { "type": "string", "format": "date-time" },
+    "expiresAt": { "type": "string", "format": "date-time" },
+    "blocklistBloom": { "type": "string", "contentEncoding": "base64", "minLength": 1 },
+    "blocklistExact": { "type": "string", "contentEncoding": "base64" },
+    "brandDomains": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "\\." }
+    },
+    "confusablesMap": { "type": "string", "contentEncoding": "base64" },
+    "tldRiskTable": {
+      "type": "object",
+      "additionalProperties": { "type": "number", "minimum": 0, "maximum": 100 }
+    },
+    "dkimKeyCache": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "urgencyLexicon": {
+      "type": "object",
+      "additionalProperties": { "type": "number", "minimum": 0, "maximum": 100 }
+    },
+    "publicSuffixes": { "type": "array", "items": { "type": "string" } },
+    "nextKey": {
+      "type": "object",
+      "required": ["publicKey", "signature"],
+      "properties": {
+        "publicKey": { "type": "string", "contentEncoding": "base64url" },
+        "signature": { "type": "string", "contentEncoding": "base64url" }
+      }
+    },
+    "signature": { "type": "string", "contentEncoding": "base64url", "minLength": 1 }
+  }
+}

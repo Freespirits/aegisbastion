@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<nmaprun scanner="nmap" args="nmap -oX - -sV --script vuln,banner 192.0.2.10" start="1722384000" version="7.94">
+  <host>
+    <status state="up" reason="echo-reply"/>
+    <address addr="192.0.2.10" addrtype="ipv4"/>
+    <ports>
+      <port protocol="tcp" portid="22">
+        <state state="open" reason="syn-ack"/>
+        <service name="ssh" product="OpenSSH" version="8.9p1"/>
+      </port>
+      <port protocol="tcp" portid="443">
+        <state state="open" reason="syn-ack"/>
+        <service name="https" product="nginx" version="1.18.0"/>
+        <script id="ssl-heartbleed" output="VULNERABLE: The Heartbleed Bug is a serious vulnerability in the popular OpenSSL cryptographic software library. CVE-2014-0160">
+          <table>
+            <elem key="title">The Heartbleed Bug</elem>
+            <elem key="state">VULNERABLE</elem>
+            <elem>CVE-2014-0160</elem>
+            <elem key="risk factor">High</elem>
+          </table>
+        </script>
+        <script id="ssl-dh-params" output="Diffie-Hellman Key Exchange Insufficient Group Strength (weak): WEAK: 1024-bit MODP group"/>
+      </port>
+      <port protocol="tcp" portid="445">
+        <state state="open" reason="syn-ack"/>
+        <service name="microsoft-ds" product="Windows SMB"/>
+        <script id="smb-vuln-ms17-010" output="VULNERABLE: Remote Code Execution vulnerability in Microsoft SMBv1 servers (ms17-010). CVE-2017-0143">
+          <table>
+            <elem key="title">Remote Code Execution vulnerability in Microsoft SMBv1</elem>
+            <elem key="state">VULNERABLE</elem>
+            <elem>CVE-2017-0143</elem>
+            <elem key="risk factor">Critical</elem>
+          </table>
+        </script>
+      </port>
+      <port protocol="tcp" portid="8080">
+        <state state="closed" reason="reset"/>
+        <service name="http-proxy"/>
+        <script id="http-vuln-cve2021-41773" output="VULNERABLE: Apache path traversal CVE-2021-41773"/>
+      </port>
+    </ports>
+  </host>
+  <host>
+    <status state="down" reason="no-response"/>
+    <address addr="192.0.2.11" addrtype="ipv4"/>
+  </host>
+</nmaprun>

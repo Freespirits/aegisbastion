@@ -1,0 +1,13 @@
+{
+  "name": "@aegisbastion/gen",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Generated TypeScript stubs for the AegisBastion contracts (protoc-gen-es v2). Regenerate with `make proto-gen` — do not edit by hand.",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@bufbuild/protobuf": "^2.2.3"
+  }
+}

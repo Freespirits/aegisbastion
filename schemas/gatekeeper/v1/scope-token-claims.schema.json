@@ -1,0 +1,147 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aegisbastion.io/schemas/gatekeeper/v1/scope-token-claims.schema.json",
+  "title": "Authorization Token v1.1 — Scope Token claim set",
+  "description": "The gatekeeper Scope Token JWT payload (doc 01 §5.5 as amended by Ruling A, converged with doc 11 §3.2; Ruling C5: the ONLY execution credential). Header is always {\"alg\": \"EdDSA\", \"typ\": \"JWT\", \"kid\": \"gk-…\"} — Ed25519, verified against gatekeeper's JWKS (cached ≤ 5 min, two active keys max, kid rotation). Rules not expressible statically (enforced by token-service/PEP): exp − iat ≤ 900 s (15-min TTL for ALL active classes R1–R3); no unauthenticated refresh — long-running work re-authorizes mid-run via the SDK/PEP; tokens are task-bound (jti reuse across tasks = anomaly + auto-revocation); mTLS workload identity is required IN ADDITION to the token; R2/R3 tokens always use the exact-enumerated target manifest; nbf verified with 60 s leeway, skew > 120 s rejected.",
+  "type": "object",
+  "required": ["iss", "aud", "jti", "sub", "task_id", "roe_id", "roe_version", "risk_class", "capabilities", "targets", "scope_bound", "iat", "nbf", "exp"],
+  "additionalProperties": false,
+  "properties": {
+    "iss": {
+      "description": "Issuer — always gatekeeper.platform.",
+      "type": "string",
+      "const": "gatekeeper.platform"
+    },
+    "aud": {
+      "description": "Audience — always aegisbastion.modules.",
+      "type": "string",
+      "const": "aegisbastion.modules"
+    },
+    "jti": {
+      "description": "Token id (ULID). This is the authorization_token_id carried by AlertEvent v1 producers (doc 05 §5.2).",
+      "type": "string",
+      "pattern": "^tok_"
+    },
+    "sub": {
+      "description": "Subject — the executing agent/workload, e.g. \"agent_01J92F…\" or \"svc-stress-engine\".",
+      "type": "string",
+      "minLength": 1
+    },
+    "task_id": {
+      "description": "Task this token is bound to — single-purpose, useless for any other task.",
+      "type": "string",
+      "minLength": 1
+    },
+    "roe_id": {
+      "description": "RoE authorizing the work.",
+      "type": "string",
+      "pattern": "^roe_"
+    },
+    "roe_version": {
+      "description": "RoE version the token binds to; PEPs re-validate and halt on version/expiry change.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "risk_class": {
+      "description": "Authorized risk class. Tokens are minted only for active classes R1–R3; R0 requires no per-target token (doc 11 §1).",
+      "type": "string",
+      "enum": ["R1", "R2", "R3"]
+    },
+    "capabilities": {
+      "description": "Capabilities this token permits, e.g. [\"stress.http_flood\"].",
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "minItems": 1
+    },
+    "targets": {
+      "description": "Hashed target manifest reference (doc 01 §5.5). Exact-enumerated form: manifest holds the concrete target list. Scope-bound watch-token form (scope_bound=true): manifest holds the canonical RoE scope document and manifest_sha256 IS the \"scope:sha256:<hash>\" audit value (Ruling A.3).",
+      "type": "object",
+      "required": ["hash_alg", "manifest_uri", "manifest_sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "hash_alg": {
+          "description": "Always sha256.",
+          "type": "string",
+          "const": "sha256"
+        },
+        "manifest_uri": {
+          "description": "e.g. \"blob://tokens/tok_01J9ZM8W3F/targets.json\" or \"…/scope.json\" for watch tokens.",
+          "type": "string",
+          "minLength": 1
+        },
+        "manifest_sha256": {
+          "description": "SHA-256 (hex) of the manifest bytes.",
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "count": {
+          "description": "Number of concrete targets (exact-enumerated form; omitted for scope-bound).",
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "scope_bound": {
+      "description": "Ruling A extension — the scope-bound watch-token form. Valid ONLY for the R1 standing capabilities monitor.watch / monitor.rescan (see allOf below). When true, the SDK/PEP evaluates each probe target against the manifest's embedded canonical scope (domains, CIDRs, exclusions) using doc 01 §10.1's canonicalized matching (longest-prefix/exact-host); EXCLUSIONS ALWAYS WIN; fail-closed — a scan job without a valid in-scope token is dead-lettered and audit-logged.",
+      "type": "boolean"
+    },
+    "rate_caps": {
+      "description": "Self-contained rate caps enforced by the PEP per burst — the token is NOT a capability to bypass rate limits (doc 11 §3.2). doc 01 §5.5 form {\"max_rps\": 50}; doc 11 §3.2 form {\"rps\": 5000, \"max_concurrent\": 2} — max_rps ≡ rps, one claim set.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_rps": {
+          "description": "Requests-per-second ceiling.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_concurrent": {
+          "description": "Concurrency ceiling.",
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "approval_id": {
+      "description": "Four-eyes approval reference (\"appr_…\") — mandatory for R3 and for R2 stress.* on production targets (Ruling B.4).",
+      "type": "string",
+      "pattern": "^appr_"
+    },
+    "iat": {
+      "description": "Issued-at (Unix seconds).",
+      "type": "integer"
+    },
+    "nbf": {
+      "description": "Not-before (Unix seconds; 60 s leeway on verification).",
+      "type": "integer"
+    },
+    "exp": {
+      "description": "Expiry (Unix seconds) — exp − iat ≤ 900 (15-min TTL, Ruling C5), enforced by token-service at mint.",
+      "type": "integer"
+    }
+  },
+  "allOf": [
+    {
+      "description": "scope_bound=true is valid ONLY for the R1 standing capabilities monitor.watch / monitor.rescan (Ruling A.1, A.2).",
+      "if": {
+        "properties": { "scope_bound": { "const": true } }
+      },
+      "then": {
+        "properties": {
+          "risk_class": { "const": "R1" },
+          "capabilities": {
+            "type": "array",
+            "items": { "enum": ["monitor.watch", "monitor.rescan"] }
+          }
+        }
+      }
+    },
+    {
+      "description": "Four-eyes approval reference is mandatory for R3 (doc 01 §5.5, Ruling B.4). The R2 stress.*-on-production case is enforced by policy-service step 7 (needs target context, not statically checkable).",
+      "if": {
+        "properties": { "risk_class": { "const": "R3" } }
+      },
+      "then": { "required": ["approval_id"] }
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+# gqlgen config for the data-platform GraphQL Query API (doc 09 §5).
+schema:
+  - schema.graphqls
+
+exec:
+  filename: generated.go
+  package: queryapi
+
+model:
+  filename: models_gen.go
+  package: queryapi
+
+resolver:
+  layout: follow-schema
+  dir: .
+  package: queryapi
+  filename_template: "{name}.resolvers.go"
+  type: Resolver
+
+models:
+  JSON:
+    model:
+      - github.com/99designs/gqlgen/graphql.Map
+
+omit_gqlgen_file_notice: true

@@ -1,0 +1,58 @@
+{
+  "name": "@aegisbastion/phish-catcher",
+  "version": "0.1.0",
+  "description": "Phish-Catcher (doc 07): client-side phishing-detection library — modular check pipeline, URL/DOM/content heuristics, signed intel/policy bundles, zero-external-transmission architecture, Chrome MV3 extension, Node batch CLI. MVP-A standalone; hub transport seam behind a feature flag (MVP-B).",
+  "license": "UNLICENSED",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./node": {
+      "types": "./dist/node.d.ts",
+      "import": "./dist/node.js"
+    },
+    "./browser": {
+      "types": "./dist/browser.d.ts",
+      "import": "./dist/browser.js"
+    }
+  },
+  "bin": {
+    "phish-catcher": "bin/phish-catcher.mjs"
+  },
+  "files": [
+    "dist",
+    "bin",
+    "schemas",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "build:ext": "tsup --config tsup.ext.config.ts",
+    "pack:ext": "node scripts/pack-ext.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@bufbuild/protobuf": "^2.2.3",
+    "canonicalize": "^2.1.0",
+    "postal-mime": "^2.4.3"
+  },
+  "devDependencies": {
+    "@aegisbastion/agent-sdk": "file:../../sdks/ts",
+    "@types/chrome": "^0.0.287",
+    "@types/node": "^22.0.0",
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
+    "tsup": "^8.5.0",
+    "typescript": "^5.5.4",
+    "vitest": "^3.2.4"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

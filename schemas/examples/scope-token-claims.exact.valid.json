@@ -1,0 +1,22 @@
+{
+  "iss": "gatekeeper.platform",
+  "aud": "aegisbastion.modules",
+  "jti": "tok_01J9ZM8W3F",
+  "sub": "svc-stress-engine",
+  "task_id": "task_01J9ZLQ1AA",
+  "roe_id": "roe_01J9ZK3E6T",
+  "roe_version": 7,
+  "risk_class": "R2",
+  "capabilities": ["stress.http_flood"],
+  "targets": {
+    "hash_alg": "sha256",
+    "manifest_uri": "blob://tokens/tok_01J9ZM8W3F/targets.json",
+    "manifest_sha256": "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae",
+    "count": 14
+  },
+  "scope_bound": false,
+  "rate_caps": { "max_rps": 5000, "max_concurrent": 2 },
+  "iat": 1785400000,
+  "nbf": 1785400000,
+  "exp": 1785400900
+}

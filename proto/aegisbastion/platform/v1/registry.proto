@@ -1,0 +1,184 @@
+syntax = "proto3";
+
+package aegisbastion.platform.v1;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+import "aegisbastion/platform/v1/task.proto";
+import "aegisbastion/platform/v1/types.proto";
+
+// Agent registration and the agent-facing RPC surface (doc 01 §5.8, §8.3, §9).
+option go_package = "github.com/aegisbastion/aegisbastion/gen/go/aegisbastion/platform/v1;platformv1";
+
+// AgentType — the module kinds that may register (doc 01 §5.8).
+enum AgentType {
+  // Zero value; unset.
+  AGENT_TYPE_UNSPECIFIED = 0;
+  // Discover (doc 02, EASM ingestion).
+  AGENT_TYPE_DISCOVER = 1;
+  // Monitor (doc 03, 24/7 change detection).
+  AGENT_TYPE_MONITOR = 2;
+  // Detect (doc 04, vuln scanning + validation).
+  AGENT_TYPE_DETECT = 3;
+  // Alert / herald (doc 05, sole notification egress per Ruling C7).
+  AGENT_TYPE_ALERT = 4;
+  // Stress-testing engine (doc 06, MVP-B).
+  AGENT_TYPE_DDOS_ENGINE = 5;
+  // Phish-Catcher (doc 07).
+  AGENT_TYPE_PHISH_CATCHER = 6;
+  // Agentic AI red-team (doc 08, R3 sandboxed).
+  AGENT_TYPE_AI_RED_TEAM = 7;
+}
+
+// Capability is one invocable unit an agent offers (doc 01 §9 item 2). The
+// Orchestrator rejects tasks for unregistered capabilities.
+message Capability {
+  // Exact capability name, e.g. "monitor.watch", "detect.scan.web".
+  string name = 1;
+  // Highest risk class this capability may execute (e.g. monitor.watch/rescan = R1,
+  // monitor.baseline.set/feed.sync = R0 per Ruling A; detect.* = R2).
+  RiskClass risk_class_max = 2;
+  // Params schema version, e.g. "v1".
+  string schema_version = 3;
+}
+
+// AgentIdentity binds the agent to its workload identity (doc 01 §9 item 1):
+// platform-CA-issued mTLS cert with the SPIFFE ID in the SANs at MVP; full SPIRE
+// later.
+message AgentIdentity {
+  // SPIFFE ID, e.g. "spiffe://aegisbastion/agent/ai-red-team/agent_01J92F".
+  string spiffe_id = 1;
+}
+
+// AgentLimits caps agent concurrency.
+message AgentLimits {
+  // Maximum simultaneous task executions.
+  uint32 max_concurrent_tasks = 1;
+}
+
+// AgentManifest — registration record (doc 01 §5.8). Agents register at startup
+// and re-register on version change.
+message AgentManifest {
+  // Assigned at first registration, e.g. "agent_01J92F…".
+  string agent_id = 1;
+  // Module kind.
+  AgentType agent_type = 2;
+  // Semantic version of the agent build.
+  string version = 3;
+  // Build provenance, e.g. "sha256:…".
+  string build_hash = 4;
+  // Offered capabilities.
+  repeated Capability capabilities = 5;
+  // Workload identity.
+  AgentIdentity identity = 6;
+  // Concurrency limits.
+  AgentLimits limits = 7;
+  // Deployment region hint, e.g. "eastus".
+  string region = 8;
+  // True when the agent runs sandboxed (mandatory for R3).
+  bool sandboxed = 9;
+}
+
+// RegisterRequest presents the agent's manifest (mTLS identity required).
+message RegisterRequest {
+  // The manifest; agent_id empty on first registration, present on re-registration.
+  AgentManifest manifest = 1;
+}
+
+// RegisterResponse confirms registration and returns the assigned identity.
+message RegisterResponse {
+  // Server-assigned (or confirmed) agent id.
+  string agent_id = 1;
+}
+
+// HeartbeatRequest — 10 s cadence; Registry TTL is 30 s (doc 01 §8.1).
+message HeartbeatRequest {
+  // Heartbeating agent.
+  string agent_id = 1;
+  // Agent-local time of the heartbeat.
+  google.protobuf.Timestamp ts = 2;
+  // Currently running task ids (for Orchestrator reconciliation).
+  repeated string running_task_ids = 3;
+}
+
+// HeartbeatResponse may carry control signals back to the agent.
+message HeartbeatResponse {
+  // True when a kill switch (global/per-agent) is active for this agent — the
+  // agent must halt target contact within 5 s (doc 01 §10.5).
+  bool kill_active = 1;
+}
+
+// AckTaskRequest acknowledges an assignment (within 10 s or it redelivers,
+// doc 01 §9 item 3).
+message AckTaskRequest {
+  // Acknowledging agent.
+  string agent_id = 1;
+  // Assignment being acknowledged.
+  string task_id = 2;
+}
+
+// AckTaskResponse confirms the ACK.
+message AckTaskResponse {
+  // True when the ACK was recorded.
+  bool acked = 1;
+}
+
+// ReportProgressRequest streams liveness/progress (e.g. Monitor every 60 s with
+// {assets_watched, queue_depth, probes_per_min}, doc 03 §4.3).
+message ReportProgressRequest {
+  // Reporting agent.
+  string agent_id = 1;
+  // Task in progress.
+  string task_id = 2;
+  // Module-defined progress payload (percent, counters, …).
+  google.protobuf.Struct progress = 3;
+}
+
+// ReportProgressResponse confirms receipt.
+message ReportProgressResponse {
+  // True when recorded.
+  bool recorded = 1;
+}
+
+// ReportResultRequest delivers the terminal TaskResult (idempotent on task_id).
+message ReportResultRequest {
+  // The terminal result.
+  TaskResult result = 1;
+}
+
+// ReportResultResponse confirms receipt.
+message ReportResultResponse {
+  // True when recorded (idempotent — repeats return true).
+  bool recorded = 1;
+}
+
+// StreamTasksRequest opens the long-poll assignment stream for an agent
+// (alternative to bus subscription, doc 01 §8.3).
+message StreamTasksRequest {
+  // Agent requesting its assignment stream.
+  string agent_id = 1;
+}
+
+// StreamTasksResponse carries one assignment per message.
+message StreamTasksResponse {
+  // The assignment; same payload as the bus path.
+  TaskAssignment assignment = 1;
+}
+
+// AgentService — the agent-facing RPC surface (doc 01 §8.3's "AgentAPI"). Agents
+// either subscribe to the bus or long-poll StreamTasks; the TaskAssignment
+// payload is identical either way and the Orchestrator abstracts the transport.
+service AgentService {
+  // Register or re-register an agent manifest (mTLS required).
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+  // 10 s liveness heartbeat.
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  // Acknowledge an assignment (≤ 10 s or redelivery).
+  rpc AckTask(AckTaskRequest) returns (AckTaskResponse);
+  // Report execution progress.
+  rpc ReportProgress(ReportProgressRequest) returns (ReportProgressResponse);
+  // Report the terminal task result.
+  rpc ReportResult(ReportResultRequest) returns (ReportResultResponse);
+  // Server-stream of assignments for the calling agent.
+  rpc StreamTasks(StreamTasksRequest) returns (stream StreamTasksResponse);
+}

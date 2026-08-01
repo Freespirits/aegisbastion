@@ -1,0 +1,202 @@
+syntax = "proto3";
+
+package aegisbastion.platform.v1;
+
+import "google/protobuf/timestamp.proto";
+import "aegisbastion/platform/v1/audit.proto";
+import "aegisbastion/platform/v1/types.proto";
+
+// Mission lifecycle (doc 01 §5.1, §6.1) and the operator-facing Mission API
+// (doc 01 §7.3).
+option go_package = "github.com/aegisbastion/aegisbastion/gen/go/aegisbastion/platform/v1;platformv1";
+
+// MissionState is the mission lifecycle state machine (doc 01 §5.1, §4.3).
+enum MissionState {
+  // Zero value; unset.
+  MISSION_STATE_UNSPECIFIED = 0;
+  // Created but not yet activated.
+  MISSION_STATE_DRAFT = 1;
+  // Accepting plans and dispatching tasks.
+  MISSION_STATE_ACTIVE = 2;
+  // Operator-paused; no new dispatches.
+  MISSION_STATE_PAUSED = 3;
+  // Objective met; terminal.
+  MISSION_STATE_COMPLETED = 4;
+  // Owning commander crashed; warm standby resuming via context replay (doc 01 §4.3).
+  MISSION_STATE_PLANNER_DEGRADED = 5;
+  // Kill switch engaged (per-mission scope); terminal until operator reactivation.
+  MISSION_STATE_KILLED = 6;
+}
+
+// Mission — operator intent bound to a Rules-of-Engagement record (doc 01 §5.1).
+// The RoE itself lives exclusively in gatekeeper's roe-service (Ruling B); the
+// command layer references it by roe_id and keeps no RoE tables.
+message Mission {
+  // Server-assigned ULID, e.g. "msn_01J8ZK…".
+  string mission_id = 1;
+  // Human-readable name, unique per org.
+  string name = 2;
+  // Exactly one owning commander; the other may submit delegated sub-plans.
+  Commander owning_commander = 3;
+  // Free-text objective, e.g. "map and monitor acme.com attack surface".
+  string objective = 4;
+  // REQUIRED. Reference to the gatekeeper RoE record authorizing this mission.
+  string roe_id = 5;
+  // RoE version validated at mission admission; re-checked at dispatch.
+  uint64 roe_version = 6;
+  // Default priority for tasks in this mission.
+  Priority priority = 7;
+  // Free-form labels (customer, env, …).
+  map<string, string> labels = 8;
+  // Operator identity that created the mission, e.g. "op_jane@example.com".
+  string created_by = 9;
+  // Creation time (UTC).
+  google.protobuf.Timestamp created_at = 10;
+  // Current lifecycle state.
+  MissionState state = 11;
+}
+
+// CreateMissionRequest — operator creates a mission (RBAC: operator role).
+message CreateMissionRequest {
+  // Human-readable name.
+  string name = 1;
+  // Owning commander for plan arbitration.
+  Commander owning_commander = 2;
+  // Free-text objective.
+  string objective = 3;
+  // Gatekeeper RoE reference — validated against gatekeeper (JWKS signature,
+  // status, window, scope) before admission (doc 01 §6.1 step 2).
+  string roe_id = 4;
+  // Default task priority.
+  Priority priority = 5;
+  // Free-form labels.
+  map<string, string> labels = 6;
+  // Operator identity (also taken from mTLS at the API boundary).
+  string created_by = 7;
+}
+
+// CreateMissionResponse carries the persisted mission.
+message CreateMissionResponse {
+  // The created mission, with server-assigned mission_id and state DRAFT.
+  Mission mission = 1;
+}
+
+// GetMissionRequest identifies a mission.
+message GetMissionRequest {
+  // Mission ULID.
+  string mission_id = 1;
+}
+
+// GetMissionResponse returns the mission.
+message GetMissionResponse {
+  // The requested mission.
+  Mission mission = 1;
+}
+
+// PauseMissionRequest halts new dispatches for a mission.
+message PauseMissionRequest {
+  // Mission ULID.
+  string mission_id = 1;
+}
+
+// PauseMissionResponse confirms the transition.
+message PauseMissionResponse {
+  // Mission after the transition (state PAUSED).
+  Mission mission = 1;
+}
+
+// ResumeMissionRequest resumes a paused mission.
+message ResumeMissionRequest {
+  // Mission ULID.
+  string mission_id = 1;
+}
+
+// ResumeMissionResponse confirms the transition.
+message ResumeMissionResponse {
+  // Mission after the transition (state ACTIVE).
+  Mission mission = 1;
+}
+
+// KillMissionRequest engages the per-mission kill switch (doc 01 §10.5).
+message KillMissionRequest {
+  // Mission ULID.
+  string mission_id = 1;
+  // Operator-supplied reason, recorded in the KILL_SWITCH audit event.
+  string reason = 2;
+}
+
+// KillMissionResponse confirms the kill.
+message KillMissionResponse {
+  // Mission after the transition (state KILLED).
+  Mission mission = 1;
+}
+
+// ApproveRoERequest proxies an RoE approval to gatekeeper's approval-service
+// (doc 01 §7.3 — the Mission API keeps no RoE state of its own).
+message ApproveRoERequest {
+  // Gatekeeper RoE ULID.
+  string roe_id = 1;
+  // RoE version being approved.
+  uint64 roe_version = 2;
+  // Approving operator identity (must satisfy gatekeeper segregation-of-duties).
+  string approver = 3;
+}
+
+// ApproveRoEResponse returns the gatekeeper approval reference.
+message ApproveRoEResponse {
+  // Gatekeeper approval id ("appr_…") created or completed by this call.
+  string approval_id = 1;
+}
+
+// RevokeRoERequest proxies an RoE revocation to gatekeeper's roe-service;
+// revocation triggers kill of all in-flight tasks under that RoE (doc 01 §10.5).
+message RevokeRoERequest {
+  // Gatekeeper RoE ULID.
+  string roe_id = 1;
+  // Operator-supplied reason, recorded in the ROE_REVOKED audit event.
+  string reason = 2;
+}
+
+// RevokeRoEResponse confirms the revocation was accepted by gatekeeper.
+message RevokeRoEResponse {
+  // True once gatekeeper's roe-service has marked the RoE revoked.
+  bool revoked = 1;
+}
+
+// GetAuditTrailRequest asks for the hash-chained audit events of a mission.
+message GetAuditTrailRequest {
+  // Mission ULID.
+  string mission_id = 1;
+  // Optional sequence cursor for pagination (return events with seq > cursor).
+  uint64 after_seq = 2;
+  // Maximum events to return.
+  uint32 limit = 3;
+}
+
+// GetAuditTrailResponse returns audit events in sequence order.
+message GetAuditTrailResponse {
+  // Audit events (platform AuditEvent, doc 01 §5.9), ascending by seq.
+  repeated AuditEvent events = 1;
+}
+
+// MissionService is the operator-facing surface (doc 01 §7.3's "Mission API",
+// gRPC + REST via grpc-gateway). All mutating calls require operator RBAC roles
+// and emit audit events. ApproveRoE/RevokeRoE are proxied to gatekeeper.
+service MissionService {
+  // Create a mission bound to an RoE (validates the RoE against gatekeeper).
+  rpc CreateMission(CreateMissionRequest) returns (CreateMissionResponse);
+  // Fetch a mission by id.
+  rpc GetMission(GetMissionRequest) returns (GetMissionResponse);
+  // Pause dispatching for a mission.
+  rpc PauseMission(PauseMissionRequest) returns (PauseMissionResponse);
+  // Resume a paused mission.
+  rpc ResumeMission(ResumeMissionRequest) returns (ResumeMissionResponse);
+  // Engage the per-mission kill switch.
+  rpc KillMission(KillMissionRequest) returns (KillMissionResponse);
+  // Proxy an RoE approval to gatekeeper approval-service.
+  rpc ApproveRoE(ApproveRoERequest) returns (ApproveRoEResponse);
+  // Proxy an RoE revocation to gatekeeper roe-service.
+  rpc RevokeRoE(RevokeRoERequest) returns (RevokeRoEResponse);
+  // Read the mission's hash-chained audit trail.
+  rpc GetAuditTrail(GetAuditTrailRequest) returns (GetAuditTrailResponse);
+}

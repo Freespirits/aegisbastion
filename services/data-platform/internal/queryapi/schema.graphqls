@@ -1,0 +1,143 @@
+# Data Platform GraphQL Query API (doc 09 §5) — read-only governed surface.
+# Every resolver runs under a TPEL-resolved tenant identity (doc 09 §2.3/§9.6):
+# the tenant predicate is injected by the server, never taken from the query.
+# Pagination is cursor-based with a hard page cap (doc 09 §2.3: max page 500);
+# assetNeighborhood depth is capped at 4.
+
+scalar Time
+scalar JSON
+
+schema {
+  query: Query
+}
+
+type Query {
+  "One tenant-scoped asset by stable uid (null when absent in THIS tenant)."
+  asset(uid: ID!): Asset
+
+  "Keyset-paginated asset list, tenant-scoped (ORDER BY value, uid)."
+  assets(filter: AssetFilter, first: Int, after: String): AssetConnection!
+
+  "Bounded adjacency walk around one asset (depth <= 4, doc 09 §5)."
+  assetNeighborhood(uid: ID!, depth: Int): AssetNeighborhood!
+
+  "One tenant-scoped finding by id (null when absent in THIS tenant)."
+  finding(id: ID!): Finding
+
+  "Keyset-paginated findings, tenant-scoped (ORDER BY createdAt DESC, id)."
+  findings(filter: FindingFilter, first: Int, after: String): FindingConnection!
+
+  "Ingest-side attribution rollup for an Orchestrator task (doc 09 §3.1)."
+  taskRollup(taskId: ID!): TaskRollup
+}
+
+type Asset {
+  uid: ID!
+  type: String!
+  value: String!
+  attributes: JSON!
+  confidence: Float!
+  status: String!
+  firstSeen: Time!
+  lastSeen: Time!
+  roeId: String!
+}
+
+type Edge {
+  edgeId: ID!
+  src: ID!
+  dst: ID!
+  rel: String!
+  attributes: JSON!
+  firstSeen: Time!
+  lastSeen: Time!
+}
+
+type AssetNeighborhood {
+  root: Asset!
+  assets: [Asset!]!
+  edges: [Edge!]!
+}
+
+type Finding {
+  findingId: ID!
+  assetUid: ID!
+  module: String!
+  checkId: String!
+  title: String!
+  severity: String!
+  state: String!
+  fingerprint: String
+  validation: JSON!
+  risk: JSON!
+  "s3:// evidence reference — masked for viewer-role callers on sensitive findings."
+  evidenceRef: String
+  occurrence: Int!
+  firstSeen: Time!
+  lastSeen: Time!
+  taskId: String
+  compliance: JSON
+  legalHold: Boolean!
+  sensitive: Boolean!
+  createdAt: Time!
+  updatedAt: Time!
+  "Lifecycle history (doc 04 §7.3 transitions, persisted by 09)."
+  transitions: [StateTransition!]!
+}
+
+type StateTransition {
+  fromState: String
+  toState: String!
+  actor: JSON!
+  taskId: String
+  note: String
+  ts: Time!
+}
+
+type TaskRollup {
+  taskId: ID!
+  tenantId: ID!
+  batches: Int!
+  rejectedBatches: Int!
+  assetsTouched: Int!
+  findingsProduced: Int!
+  findingsBySeverity: JSON!
+  firstActivity: Time
+  lastActivity: Time
+}
+
+type PageInfo {
+  hasNextPage: Boolean!
+  endCursor: String
+  "Total rows matching the filter inside this tenant."
+  totalCount: Int!
+}
+
+type AssetConnection {
+  nodes: [Asset!]!
+  pageInfo: PageInfo!
+}
+
+type FindingConnection {
+  nodes: [Finding!]!
+  pageInfo: PageInfo!
+}
+
+input AssetFilter {
+  types: [String!]
+  statuses: [String!]
+  valuePrefix: String
+  "last_seen >= seenSince"
+  seenSince: Time
+}
+
+input FindingFilter {
+  modules: [String!]
+  severities: [String!]
+  states: [String!]
+  assetUid: ID
+  taskId: String
+  checkIdPrefix: String
+  "last_seen >= seenSince"
+  seenSince: Time
+}

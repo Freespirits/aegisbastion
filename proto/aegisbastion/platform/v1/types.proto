@@ -1,0 +1,75 @@
+syntax = "proto3";
+
+package aegisbastion.platform.v1;
+
+// Shared enums and small value types for the platform core (doc 01 §5).
+option go_package = "github.com/aegisbastion/aegisbastion/gen/go/aegisbastion/platform/v1;platformv1";
+
+// RiskClass is the platform's canonical risk taxonomy (doc 01 §5.3; Ruling B.4 —
+// doc 11's deprecated T0–T2 tiers map T0→R0, T1→R1, T2→R2∪R3).
+// Controls bind as: R0 RoE record exists; R1 +allowlist +default rate cap;
+// R2 +signed Scope Token +verified legal artifact +explicit rate cap +schedule window;
+// R3 all of R2 +four-eyes human approval +sandboxed execution.
+enum RiskClass {
+  // Zero value; never valid on the wire for a real task.
+  RISK_CLASS_UNSPECIFIED = 0;
+  // Passive / no target contact (passive DNS, CT, Phish-Catcher checks, Alert delivery).
+  RISK_CLASS_R0 = 1;
+  // Active, non-intrusive (subdomain brute-force DNS, banner grab, light HTTP probe,
+  // Monitor watch/rescan probes per Ruling A).
+  RISK_CLASS_R1 = 2;
+  // Intrusive / load-generating (vulnerability scanning, DDoS simulation).
+  RISK_CLASS_R2 = 3;
+  // Offensive / agentic (AI red-team probes, prompt injection, exfil canaries).
+  RISK_CLASS_R3 = 4;
+}
+
+// Priority classes for plan/task arbitration (doc 01 §4.2 rule 3).
+enum Priority {
+  // Zero value; unset.
+  PRIORITY_UNSPECIFIED = 0;
+  // Operator kill switch — always wins.
+  PRIORITY_P0_KILL = 1;
+  // Interactive operator tasks.
+  PRIORITY_P1_OPERATOR = 2;
+  // Monitor-triggered change tasks.
+  PRIORITY_P2_CHANGE = 3;
+  // Scheduled/planned tasks.
+  PRIORITY_P3_PLANNED = 4;
+  // Background re-scans and enrichment.
+  PRIORITY_P4_BACKGROUND = 5;
+}
+
+// Commander identifies one of the planning brains (doc 01 §4.1). Commanders
+// propose TaskPlans; only the Orchestrator disposes.
+enum Commander {
+  // Zero value; unset.
+  COMMANDER_UNSPECIFIED = 0;
+  // CAI — strategic ASM planner; may propose R0–R2.
+  COMMANDER_CAI = 1;
+  // HexStrike — offensive orchestration planner (MCP-native); may propose R0–R3.
+  COMMANDER_HEXSTRIKE = 2;
+  // Strix — agentic AI pentest planner (MCP-native, PoC-validated); may propose R0–R2.
+  COMMANDER_STRIX = 3;
+  // PentestGPT — LLM-guided pentest planner (fills the CAI AI-planner role); may propose R0–R2.
+  COMMANDER_PENTESTGPT = 4;
+}
+
+// RateCaps carried into assignments and enforced three ways (doc 01 §10.3):
+// Scheduler admission, assignment-embedded agent-side token bucket, and per-worker
+// caps for distributed engines.
+message RateCaps {
+  // Maximum requests per second per target (default platform cap: 100 for R1).
+  uint32 max_rps_per_target = 1;
+  // Maximum concurrent intrusive tasks under one RoE.
+  uint32 max_concurrent_intrusive = 2;
+}
+
+// TraceContext carries W3C trace propagation through envelopes and assignments
+// (doc 01 §5.6, §9 item 8).
+message TraceContext {
+  // W3C traceparent header value, e.g. "00-4bf92f…-00f067…-01".
+  string traceparent = 1;
+  // Optional W3C tracestate header value.
+  string tracestate = 2;
+}

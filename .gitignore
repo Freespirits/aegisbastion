@@ -1,0 +1,29 @@
+# Vendored tool binaries (kept in-repo under bin/, not committed)
+bin/*.exe
+
+# Node
+node_modules/
+
+# Generated stubs (regenerate with `make proto-gen`)
+gen/go/aegisbastion/
+gen/ts/aegisbastion/
+
+# OS / editor noise
+Thumbs.db
+.DS_Store
+*.swp
+
+# Test/tool logs
+*.log
+
+# Local environment and secrets (never commit; .env.example stays)
+.env
+**/.env
+*.pem
+*.key
+id_rsa*
+
+# Go workspace files (documented workflow is GOWORK=off per-module)
+go.work
+go.work.sum
+
