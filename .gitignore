@@ -27,3 +27,4 @@ id_rsa*
 go.work
 go.work.sum
 
+*.exe
