@@ -1,8 +1,14 @@
 @echo off
 REM Run golang-migrate inside the compose network against the dev DB.
 REM usage: migrate-dev.cmd <command> [args...]   e.g. migrate-dev.cmd down 1
-"C:\Program Files\Docker\Docker\resources\bin\docker.exe" run --rm ^
+REM Migrations path is resolved relative to this script (repo root = ..\..\..).
+setlocal
+pushd "%~dp0..\..\.."
+set "REPO_ROOT=%CD%"
+popd
+docker run --rm ^
   --network aegisbastion-mvp-a_default ^
-  -v E:\aegisbastion\db\migrations:/migrations:ro ^
+  -v "%REPO_ROOT%\db\migrations":/migrations:ro ^
   migrate/migrate:4 -path=/migrations ^
   -database postgres://aegisbastion:aegisbastion-dev@postgres:5432/aegisbastion?sslmode=disable %*
+endlocal
